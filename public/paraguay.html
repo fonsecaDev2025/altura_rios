@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Río Paraguay — DMH (convencionales)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-bg" aria-hidden="true"></div>
+    <header class="hero">
+      <p class="hero__kicker">Paraguay · Dirección de Meteorología e Hidrología</p>
+      <h1 class="hero__title">Río Paraguay</h1>
+      <p class="hero__sub">
+        Estaciones convencionales. Datos obtenidos desde el servidor local (sin CORS en el navegador).
+      </p>
+      <div class="hero__actions">
+        <button type="button" class="btn" id="btn-refresh">Actualizar</button>
+        <a
+          class="btn btn--ghost"
+          href="https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Abrir fuente oficial</a
+        >
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Secciones">
+      <a href="/" class="tabs__item">PNA · Argentina</a>
+      <a href="/paraguay.html" class="tabs__item tabs__item--current" aria-current="page">Paraguay · DMH</a>
+    </nav>
+
+    <main class="main">
+      <section class="status" id="status-panel" aria-live="polite">
+        <p class="status__text" id="status-text">Cargando…</p>
+      </section>
+
+      <section class="meta" id="meta-section" hidden>
+        <div class="meta__chip">
+          <span class="meta__label">Extracción</span>
+          <span class="meta__value" id="meta-time"></span>
+        </div>
+        <div class="meta__chip">
+          <span class="meta__label">Estaciones</span>
+          <span class="meta__value" id="meta-count"></span>
+        </div>
+        <div class="meta__chip" id="meta-db-chip" hidden>
+          <span class="meta__label">SQLite</span>
+          <span class="meta__value" id="meta-db"></span>
+        </div>
+      </section>
+
+      <section class="warnings" id="warnings-block" hidden>
+        <h2 class="warnings__title">Avisos</h2>
+        <ul class="warnings__list" id="warnings-list"></ul>
+      </section>
+
+      <div class="table-wrap" id="table-root"></div>
+    </main>
+
+    <footer class="footer">
+      <span
+        >Fuente:
+        <a
+          href="https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php"
+          target="_blank"
+          rel="noopener noreferrer"
+          >meteorologia.gov.py</a
+        >
+        · API local <code>/api/rio-paraguay-dmh</code> · Abre esta página desde
+        <code>http://localhost:…/paraguay.html</code> (no como archivo) para guardar en SQLite.</span
+      >
+    </footer>
+
+    <script src="paraguay.js"></script>
+  </body>
+</html>

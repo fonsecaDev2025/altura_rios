@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Altura de los ríos — PNA</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-bg" aria-hidden="true"></div>
+    <header class="hero">
+      <p class="hero__kicker">Argentina · Prefectura Naval</p>
+      <h1 class="hero__title">Altura de los ríos</h1>
+      <p class="hero__sub">
+        Registro público de niveles. Datos obtenidos vía servidor local (API y scraping).
+      </p>
+      <div class="hero__actions">
+        <button type="button" class="btn" id="btn-refresh">Actualizar datos</button>
+        <a
+          class="btn btn--ghost"
+          href="https://contenidosweb.prefecturanaval.gob.ar/alturas/"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Abrir fuente oficial</a
+        >
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Secciones">
+      <a href="/" class="tabs__item tabs__item--current" aria-current="page">PNA · Argentina</a>
+      <a href="/paraguay.html" class="tabs__item">Paraguay · DMH</a>
+    </nav>
+
+    <main class="main">
+      <section class="status" id="status-panel" aria-live="polite">
+        <p class="status__text" id="status-text">Cargando alturas…</p>
+      </section>
+
+      <section class="meta meta--grid" id="meta-section" hidden>
+        <div class="meta__chip meta__chip--block">
+          <span class="meta__label">Origen oficial</span>
+          <a class="meta__value meta__link" id="meta-source" href="#" target="_blank" rel="noopener"></a>
+        </div>
+        <div class="meta__chip meta__chip--block">
+          <span class="meta__label">Última extracción</span>
+          <span class="meta__value" id="meta-time"></span>
+        </div>
+        <div class="meta__chip meta__chip--block">
+          <span class="meta__label">Puertos / registros</span>
+          <span class="meta__value" id="meta-count"></span>
+        </div>
+      </section>
+
+      <section class="warnings" id="warnings-block" hidden>
+        <h2 class="warnings__title">Avisos</h2>
+        <ul class="warnings__list" id="warnings-list"></ul>
+      </section>
+
+      <section class="toolbar" id="toolbar" hidden>
+        <label class="sr-only" for="filter-input">Filtrar tabla</label>
+        <input
+          type="search"
+          id="filter-input"
+          class="filter-input"
+          placeholder="Buscar por puerto, río o estado…"
+          autocomplete="off"
+        />
+      </section>
+
+      <section class="table-wrap" id="table-section"></section>
+    </main>
+
+    <footer class="footer">
+      <span
+        >Fuente:
+        <a
+          href="https://contenidosweb.prefecturanaval.gob.ar/alturas/"
+          target="_blank"
+          rel="noopener noreferrer"
+          >contenidosweb.prefecturanaval.gob.ar</a
+        >
+        · API local <code>/api/data</code></span
+      >
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
