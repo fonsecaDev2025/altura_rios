@@ -10,7 +10,9 @@
     "install:chrome": "npx puppeteer browsers install chrome",
     "postinstall": "npx puppeteer browsers install chrome",
     "import:historico": "node scripts/importHistorico.js",
-    "sync:paraguay": "node scripts/syncParaguayDmh.js"
+    "sync:paraguay": "node scripts/syncParaguayDmh.js",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "engines": {
     "node": ">=18"
@@ -22,5 +24,8 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "wrangler": "^4.81.0"
+  }
 }
