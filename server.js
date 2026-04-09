@@ -19,12 +19,54 @@ const PARAGUAY_DMH_URL =
   "https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php";
 
 const app = express();
+
+/**
+ * CORS: el front en Cloudflare (Pages / *.workers.dev) llama al API en otro servidor.
+ * Opcional: CORS_ORIGIN=https://tu-app.workers.dev,https://tu-dominio.com
+ * (sin espacios o con espacios tras coma). Si está vacío, se usa *.
+ */
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const list = (process.env.CORS_ORIGIN || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (list.length > 0) {
+    if (origin && list.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Accept, Content-Type");
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  next();
+});
+
 /** Puerto inicial; si está ocupado se prueba el siguiente (hasta +14). */
 const BASE_PORT = Number(process.env.PORT) || 3000;
 const PORT_TRY_LIMIT = 15;
 
 const TARGET_URL = "https://contenidosweb.prefecturanaval.gob.ar/alturas/";
 const SITE_ORIGIN = "https://contenidosweb.prefecturanaval.gob.ar";
+const SCRAPE_RETRIES = Math.max(1, Number(process.env.SCRAPE_RETRIES) || 2);
+const SCRAPE_NAV_TIMEOUT_MS = Math.max(
+  20000,
+  Number(process.env.SCRAPE_NAV_TIMEOUT_MS) || 90000
+);
+const SCRAPE_SELECTOR_TIMEOUT_MS = Math.max(
+  15000,
+  Number(process.env.SCRAPE_SELECTOR_TIMEOUT_MS) || 60000
+);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Extrae filas de table.fpTable (estructura HTML del sitio oficial).
@@ -60,9 +102,8 @@ async function fetchRioParaguayDmh() {
   };
 }
 
-async function scrapeAlturas() {
+async function scrapeAlturasOnce() {
   let browser = null;
-  const warnings = [];
 
   try {
     const launchOpts = {
@@ -103,10 +144,12 @@ async function scrapeAlturas() {
 
     await page.goto(TARGET_URL, {
       waitUntil: "domcontentloaded",
-      timeout: 60000,
+      timeout: SCRAPE_NAV_TIMEOUT_MS,
     });
 
-    await page.waitForSelector("table.fpTable tbody tr", { timeout: 40000 });
+    await page.waitForSelector("table.fpTable tbody tr", {
+      timeout: SCRAPE_SELECTOR_TIMEOUT_MS,
+    });
 
     const items = await page.evaluate((origin) => {
       const T = (el) =>
@@ -144,18 +187,12 @@ async function scrapeAlturas() {
       return out;
     }, SITE_ORIGIN);
 
-    if (!items.length) {
-      warnings.push(
-        "No se obtuvieron filas. Comprueba que table.fpTable siga existiendo en la página."
-      );
-    }
-
     return {
       source: TARGET_URL,
       scrapedAt: new Date().toISOString(),
       count: items.length,
       items,
-      warnings,
+      warnings: [],
     };
   } catch (err) {
     throw new Error(`Scraping fallido: ${err.message || String(err)}`);
@@ -164,6 +201,31 @@ async function scrapeAlturas() {
       await browser.close().catch(() => {});
     }
   }
+}
+
+async function scrapeAlturas() {
+  let lastError = null;
+  for (let attempt = 1; attempt <= SCRAPE_RETRIES; attempt += 1) {
+    try {
+      const data = await scrapeAlturasOnce();
+      if (!data.items.length) {
+        data.warnings.push(
+          "No se obtuvieron filas. Comprueba que table.fpTable siga existiendo en la página."
+        );
+      }
+      if (attempt > 1) {
+        data.warnings.push(`Scraping recuperado en intento ${attempt}/${SCRAPE_RETRIES}.`);
+      }
+      return data;
+    } catch (err) {
+      lastError = err;
+      if (attempt < SCRAPE_RETRIES) {
+        const delay = 1500 * attempt;
+        await sleep(delay);
+      }
+    }
+  }
+  throw lastError || new Error("Scraping fallido: error desconocido.");
 }
 
 app.use(express.static(path.join(__dirname, "public")));
