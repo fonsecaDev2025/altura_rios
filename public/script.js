@@ -1,10 +1,13 @@
 /**
- * Dashboard: GET /api/data → tabla de alturas de ríos (PNA).
- * JSON: { ok, source, scrapedAt, count, items[], warnings[] }
- * items: puerto, rio, ultimoRegistro, variacion, periodo, fechaHora, estado, …
+ * Dashboard: GET /api/data → tabla de alturas de ríos (FICH/UNL).
+ * items: puerto, rio, altura, variacion, estado, alturaAnterior, alerta, evacuacion
  */
 
-const API_URL = "/api/data";
+function apiDataUrl() {
+  return typeof resolveApiUrl !== "undefined"
+    ? resolveApiUrl("/api/data")
+    : "/api/data";
+}
 
 const el = {
   statusPanel: document.getElementById("status-panel"),
@@ -21,14 +24,13 @@ const el = {
   tableSection: document.getElementById("table-section"),
 };
 
-/** Copia en memoria para filtrar sin volver a pedir la API */
 let lastItems = [];
 
 function setLoading(loading) {
   el.btnRefresh.disabled = loading;
   el.statusPanel.classList.toggle("status--loading", loading);
   if (loading) {
-    el.statusText.textContent = "Extrayendo datos con Puppeteer…";
+    el.statusText.textContent = "Obteniendo datos…";
   }
 }
 
@@ -87,13 +89,7 @@ function renderMeta(payload) {
 
 function rowMatchesFilter(row, q) {
   if (!q) return true;
-  const hay = [
-    row.puerto,
-    row.rio,
-    row.estado,
-    row.ultimoRegistro,
-    row.fechaHora,
-  ]
+  const hay = [row.puerto, row.rio, row.estado, row.altura]
     .join(" ")
     .toLowerCase();
   return hay.includes(q);
@@ -105,7 +101,7 @@ function renderTable() {
 
   if (!lastItems.length) {
     el.tableSection.innerHTML =
-      '<p class="empty">No hay registros. Revisa la API o los selectores en el servidor.</p>';
+      '<p class="empty">No hay registros. Revisa la API.</p>';
     el.toolbar.hidden = true;
     return;
   }
@@ -118,13 +114,10 @@ function renderTable() {
         <tr>
           <th>Puerto</th>
           <th>Río</th>
-          <th>Últ. registro</th>
+          <th>Altura</th>
           <th>Variación</th>
-          <th>Periodo</th>
-          <th>Fecha / hora</th>
           <th>Estado</th>
-          <th>Reg. anterior</th>
-          <th>Fecha ant.</th>
+          <th>Alt. anterior</th>
           <th>Alerta</th>
           <th>Evacuación</th>
           <th>Hist.</th>
@@ -142,13 +135,10 @@ function renderTable() {
         <tr>
           <td data-label="Puerto">${escapeHtml(row.puerto)}</td>
           <td data-label="Río">${escapeHtml(row.rio)}</td>
-          <td data-label="Últ. registro" class="num">${escapeHtml(row.ultimoRegistro)}</td>
+          <td data-label="Altura" class="num">${escapeHtml(row.altura)}</td>
           <td data-label="Variación" class="num">${escapeHtml(row.variacion)}</td>
-          <td data-label="Periodo" class="num">${escapeHtml(row.periodo)}</td>
-          <td data-label="Fecha">${escapeHtml(row.fechaHora)}</td>
           <td data-label="Estado"><span class="${estadoClass(row.estado)}">${escapeHtml(row.estado)}</span></td>
-          <td data-label="Reg. ant." class="num">${escapeHtml(row.registroAnterior)}</td>
-          <td data-label="Fecha ant.">${escapeHtml(row.fechaAnterior)}</td>
+          <td data-label="Alt. ant." class="num">${escapeHtml(row.alturaAnterior)}</td>
           <td data-label="Alerta" class="num">${escapeHtml(row.alerta)}</td>
           <td data-label="Evac." class="num">${escapeHtml(row.evacuacion)}</td>
           <td data-label="Hist.">${hist}</td>
@@ -165,8 +155,7 @@ function renderTable() {
   el.tableSection.innerHTML = `<div class="table-scroll">${head}${rows}${foot}</div>${emptyFilter}`;
 }
 
-/** Evita que el UI quede colgado si el backend no responde (p. ej. goto bloqueado). */
-const FETCH_MS = 100000;
+const FETCH_MS = 60000;
 
 async function fetchData() {
   setLoading(true);
@@ -176,7 +165,7 @@ async function fetchData() {
   const timeoutId = setTimeout(() => controller.abort(), FETCH_MS);
 
   try {
-    const res = await fetch(API_URL, {
+    const res = await fetch(apiDataUrl(), {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
@@ -184,7 +173,11 @@ async function fetchData() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || data.ok === false) {
-      const msg = data.error || `Error HTTP ${res.status}`;
+      const msg =
+        data.error ||
+        (typeof formatApiHttpError !== "undefined"
+          ? formatApiHttpError(res.status, "/api/data")
+          : `Error HTTP ${res.status}`);
       setError(msg);
       el.metaSection.hidden = true;
       el.toolbar.hidden = true;
@@ -194,7 +187,7 @@ async function fetchData() {
       return;
     }
 
-    el.statusText.textContent = "Datos de alturas cargados correctamente.";
+    el.statusText.textContent = "Datos cargados correctamente.";
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderMeta(data);
     renderWarnings(data.warnings);
@@ -202,13 +195,9 @@ async function fetchData() {
   } catch (err) {
     console.error(err);
     if (err.name === "AbortError") {
-      setError(
-        "Tiempo de espera agotado. El scraping tardó demasiado (revisa el servidor o la red). Vuelve a intentar."
-      );
+      setError("Tiempo de espera agotado. Vuelve a intentar.");
     } else {
-      setError(
-        "No se pudo conectar al servidor. ¿Está ejecutándose Node en el puerto correcto?"
-      );
+      setError("No se pudo conectar al servidor.");
     }
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;

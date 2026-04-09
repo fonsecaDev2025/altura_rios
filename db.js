@@ -69,14 +69,15 @@ function saveUltimaExtraccionDelDia(items, scrapedAtIso) {
     for (const row of rows) {
       const puerto = (row.puerto || "").trim();
       if (!puerto) continue;
+      const altura = row.altura ?? row.ultimoRegistro ?? "";
+      const altAnt = row.alturaAnterior ?? row.registroAnterior ?? "";
       stmt.run({
         fecha_dia: fechaDia,
         puerto,
-        ultimo_registro: row.ultimoRegistro != null ? String(row.ultimoRegistro) : "",
+        ultimo_registro: altura != null ? String(altura) : "",
         variacion: row.variacion != null ? String(row.variacion) : "",
         estado: row.estado != null ? String(row.estado) : "",
-        registro_anterior:
-          row.registroAnterior != null ? String(row.registroAnterior) : "",
+        registro_anterior: altAnt != null ? String(altAnt) : "",
         extracted_at: extractedAt,
       });
       n += 1;

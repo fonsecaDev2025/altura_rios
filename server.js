@@ -13,7 +13,7 @@ const {
   saveParaguayExtraccion,
 } = require("./db");
 const { parseRioParaguay } = require("./lib/paraguayConvencional");
-const { parseAlturasHtml } = require("./lib/pnaHtmlParser");
+const { parseFichAlturas } = require("./lib/fichHtmlParser");
 
 const PARAGUAY_DMH_URL =
   "https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php";
@@ -52,8 +52,8 @@ app.use((req, res, next) => {
 const BASE_PORT = Number(process.env.PORT) || 3000;
 const PORT_TRY_LIMIT = 15;
 
-const TARGET_URL = "https://contenidosweb.prefecturanaval.gob.ar/alturas/";
-const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 60000;
+const TARGET_URL = "http://wfich1.unl.edu.ar/cim/rios/parana/alturas";
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 30000;
 const FETCH_RETRIES = Math.max(1, Number(process.env.FETCH_RETRIES) || 2);
 
 function sleep(ms) {
@@ -103,11 +103,11 @@ async function fetchAlturasOnce() {
       },
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`PNA HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`FICH HTTP ${res.status}`);
     const html = await res.text();
-    const items = parseAlturasHtml(html);
+    const items = parseFichAlturas(html);
     if (!items.length) {
-      throw new Error("No se obtuvieron filas de table.fpTable. ¿Cambió el HTML de PNA?");
+      throw new Error("No se obtuvieron filas. ¿Cambió el HTML de FICH/UNL?");
     }
     return {
       source: TARGET_URL,

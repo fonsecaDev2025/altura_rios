@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Altura de los ríos — PNA</title>
+    <title>Altura de los ríos — Cuenca del Paraná</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -15,16 +15,16 @@
   <body>
     <div class="page-bg" aria-hidden="true"></div>
     <header class="hero">
-      <p class="hero__kicker">Argentina · Prefectura Naval</p>
+      <p class="hero__kicker">Argentina · FICH/UNL (fuente PNA)</p>
       <h1 class="hero__title">Altura de los ríos</h1>
       <p class="hero__sub">
-        Registro público de niveles. Datos obtenidos vía servidor local (API y scraping).
+        Alturas hidrométricas de la cuenca del Paraná. Datos vía FICH/UNL.
       </p>
       <div class="hero__actions">
         <button type="button" class="btn" id="btn-refresh">Actualizar datos</button>
         <a
           class="btn btn--ghost"
-          href="https://contenidosweb.prefecturanaval.gob.ar/alturas/"
+          href="http://wfich1.unl.edu.ar/cim/rios/parana/alturas"
           target="_blank"
           rel="noopener noreferrer"
           >Abrir fuente oficial</a
@@ -33,7 +33,7 @@
     </header>
 
     <nav class="tabs" aria-label="Secciones">
-      <a href="/" class="tabs__item tabs__item--current" aria-current="page">PNA · Argentina</a>
+      <a href="/" class="tabs__item tabs__item--current" aria-current="page">Cuenca Paraná</a>
       <a href="/paraguay.html" class="tabs__item">Paraguay · DMH</a>
     </nav>
 
@@ -44,7 +44,7 @@
 
       <section class="meta meta--grid" id="meta-section" hidden>
         <div class="meta__chip meta__chip--block">
-          <span class="meta__label">Origen oficial</span>
+          <span class="meta__label">Origen</span>
           <a class="meta__value meta__link" id="meta-source" href="#" target="_blank" rel="noopener"></a>
         </div>
         <div class="meta__chip meta__chip--block">
@@ -52,7 +52,7 @@
           <span class="meta__value" id="meta-time"></span>
         </div>
         <div class="meta__chip meta__chip--block">
-          <span class="meta__label">Puertos / registros</span>
+          <span class="meta__label">Estaciones</span>
           <span class="meta__value" id="meta-count"></span>
         </div>
       </section>
@@ -80,15 +80,17 @@
       <span
         >Fuente:
         <a
-          href="https://contenidosweb.prefecturanaval.gob.ar/alturas/"
+          href="http://wfich1.unl.edu.ar/cim/rios/parana/alturas"
           target="_blank"
           rel="noopener noreferrer"
-          >contenidosweb.prefecturanaval.gob.ar</a
+          >FICH/UNL — Cuenca del Paraná</a
         >
-        · API local <code>/api/data</code></span
+        · API <code>/api/data</code></span
       >
     </footer>
 
+    <script src="config.js"></script>
+    <script src="api-resolve.js"></script>
     <script src="script.js"></script>
   </body>
 </html>
