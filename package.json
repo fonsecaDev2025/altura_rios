@@ -1,14 +1,13 @@
 {
   "name": "altura-rios-dashboard",
   "version": "1.0.0",
-  "description": "Dashboard con Express + Puppeteer",
+  "description": "Dashboard de alturas de ríos (fetch + regex)",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
+    "build:pages": "node scripts/gen-pages-config.cjs",
     "start": "node server.js",
     "dev": "node server.js",
-    "install:chrome": "npx puppeteer browsers install chrome",
-    "postinstall": "npx puppeteer browsers install chrome",
     "import:historico": "node scripts/importHistorico.js",
     "sync:paraguay": "node scripts/syncParaguayDmh.js"
   },
@@ -17,8 +16,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
-    "express": "^4.22.1",
-    "puppeteer": "^24.40.0"
+    "express": "^4.22.1"
   },
   "keywords": [],
   "author": "",

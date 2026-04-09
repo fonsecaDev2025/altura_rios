@@ -1,12 +1,11 @@
 /**
- * Servidor Express + API REST: scraping de alturas de ríos (PNA).
- * Fuente: Prefectura Naval Argentina — Registro público de alturas.
+ * Servidor Express + API REST: alturas de ríos (PNA + DMH Paraguay).
+ * Modo liviano: fetch + regex (sin Puppeteer/Chrome).
  */
 
 const path = require("path");
 const http = require("http");
 const express = require("express");
-const puppeteer = require("puppeteer");
 const {
   initDb,
   saveUltimaExtraccionDelDia,
@@ -54,25 +53,13 @@ const BASE_PORT = Number(process.env.PORT) || 3000;
 const PORT_TRY_LIMIT = 15;
 
 const TARGET_URL = "https://contenidosweb.prefecturanaval.gob.ar/alturas/";
-const SITE_ORIGIN = "https://contenidosweb.prefecturanaval.gob.ar";
-const SCRAPE_RETRIES = Math.max(1, Number(process.env.SCRAPE_RETRIES) || 2);
-const SCRAPE_NAV_TIMEOUT_MS = Math.max(
-  20000,
-  Number(process.env.SCRAPE_NAV_TIMEOUT_MS) || 90000
-);
-const SCRAPE_SELECTOR_TIMEOUT_MS = Math.max(
-  15000,
-  Number(process.env.SCRAPE_SELECTOR_TIMEOUT_MS) || 60000
-);
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 60000;
+const FETCH_RETRIES = Math.max(1, Number(process.env.FETCH_RETRIES) || 2);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Extrae filas de table.fpTable (estructura HTML del sitio oficial).
- * Cierra el navegador en finally para no dejar procesos colgados.
- */
 async function fetchRioParaguayDmh() {
   const res = await fetch(PARAGUAY_DMH_URL, {
     headers: {
@@ -103,110 +90,9 @@ async function fetchRioParaguayDmh() {
   };
 }
 
-async function scrapeAlturasOnce() {
-  let browser = null;
-
-  try {
-    const launchOpts = {
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-    };
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
-      launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-    }
-    browser = await puppeteer.launch(launchOpts);
-
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1400, height: 900 });
-    await page.setDefaultNavigationTimeout(60000);
-    await page.setDefaultTimeout(45000);
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    );
-
-    /**
-     * networkidle2 suele colgarse en sitios con analytics o peticiones largas.
-     * domcontentloaded + espera explícita a la tabla es más fiable.
-     * Opcional: no descargar imágenes/fuentes para acelerar y reducir ruido de red.
-     */
-    try {
-      await page.setRequestInterception(true);
-      page.on("request", (req) => {
-        const t = req.resourceType();
-        if (t === "image" || t === "font" || t === "media") {
-          req.abort().catch(() => {});
-        } else {
-          req.continue().catch(() => {});
-        }
-      });
-    } catch {
-      /* seguir sin interceptar */
-    }
-
-    await page.goto(TARGET_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: SCRAPE_NAV_TIMEOUT_MS,
-    });
-
-    await page.waitForSelector("table.fpTable tbody tr", {
-      timeout: SCRAPE_SELECTOR_TIMEOUT_MS,
-    });
-
-    const items = await page.evaluate((origin) => {
-      const T = (el) =>
-        el && el.textContent ? el.textContent.replace(/\s+/g, " ").trim() : "";
-
-      const trs = Array.from(document.querySelectorAll("table.fpTable tbody tr"));
-      const out = [];
-
-      for (const tr of trs) {
-        const cells = tr.querySelectorAll(":scope > th, :scope > td");
-        if (cells.length < 13) continue;
-
-        let href = cells[12]?.querySelector("a")?.getAttribute("href") || "";
-        href = href.replace(/\r/g, "").trim();
-        if (href.startsWith("/")) href = origin + href;
-        else if (href && !/^https?:/i.test(href)) href = origin + "/" + href.replace(/^\//, "");
-
-        const row = {
-          puerto: T(cells[0]),
-          rio: T(cells[1]),
-          ultimoRegistro: T(cells[2]),
-          variacion: T(cells[3]),
-          periodo: T(cells[4]),
-          fechaHora: T(cells[5]),
-          estado: T(cells[6]),
-          registroAnterior: T(cells[8]),
-          fechaAnterior: T(cells[9]),
-          alerta: T(cells[10]),
-          evacuacion: T(cells[11]),
-          historicoHref: href || null,
-        };
-
-        if (row.puerto || row.rio) out.push(row);
-      }
-      return out;
-    }, SITE_ORIGIN);
-
-    return {
-      source: TARGET_URL,
-      scrapedAt: new Date().toISOString(),
-      count: items.length,
-      items,
-      warnings: [],
-    };
-  } catch (err) {
-    throw new Error(`Scraping fallido: ${err.message || String(err)}`);
-  } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
-    }
-  }
-}
-
-async function fetchAlturasFallback() {
+async function fetchAlturasOnce() {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60000);
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(TARGET_URL, {
       headers: {
@@ -220,53 +106,38 @@ async function fetchAlturasFallback() {
     if (!res.ok) throw new Error(`PNA HTTP ${res.status}`);
     const html = await res.text();
     const items = parseAlturasHtml(html);
-    const warnings = ["Datos obtenidos con fallback (fetch + regex, sin Puppeteer)."];
     if (!items.length) {
-      warnings.push(
-        "No se obtuvieron filas con el parser regex. ¿Cambió el HTML de PNA?"
-      );
+      throw new Error("No se obtuvieron filas de table.fpTable. ¿Cambió el HTML de PNA?");
     }
     return {
       source: TARGET_URL,
       scrapedAt: new Date().toISOString(),
       count: items.length,
       items,
-      warnings,
+      warnings: [],
     };
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function scrapeAlturas() {
+async function fetchAlturas() {
   let lastError = null;
-  for (let attempt = 1; attempt <= SCRAPE_RETRIES; attempt += 1) {
+  for (let attempt = 1; attempt <= FETCH_RETRIES; attempt += 1) {
     try {
-      const data = await scrapeAlturasOnce();
-      if (!data.items.length) {
-        data.warnings.push(
-          "No se obtuvieron filas. Comprueba que table.fpTable siga existiendo en la página."
-        );
-      }
+      const data = await fetchAlturasOnce();
       if (attempt > 1) {
-        data.warnings.push(`Scraping recuperado en intento ${attempt}/${SCRAPE_RETRIES}.`);
+        data.warnings.push(`Recuperado en intento ${attempt}/${FETCH_RETRIES}.`);
       }
       return data;
     } catch (err) {
       lastError = err;
-      if (attempt < SCRAPE_RETRIES) {
-        const delay = 1500 * attempt;
-        await sleep(delay);
+      if (attempt < FETCH_RETRIES) {
+        await sleep(2000 * attempt);
       }
     }
   }
-  console.warn("[scrapeAlturas] Puppeteer agotado, usando fallback fetch+regex…");
-  try {
-    return await fetchAlturasFallback();
-  } catch (fbErr) {
-    console.error("[fallback]", fbErr);
-    throw lastError || fbErr;
-  }
+  throw lastError || new Error("No se pudo obtener datos de PNA.");
 }
 
 app.use(express.static(path.join(__dirname, "public")));
@@ -284,7 +155,7 @@ try {
 
 app.get("/api/data", async (req, res) => {
   try {
-    const data = await scrapeAlturas();
+    const data = await fetchAlturas();
     let dbSaved = null;
     if (data.items && data.items.length > 0) {
       try {
