@@ -9,7 +9,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "import:historico": "node scripts/importHistorico.js",
-    "sync:paraguay": "node scripts/syncParaguayDmh.js"
+    "sync:paraguay": "node scripts/syncParaguayDmh.js",
+    "sync:d1": "node scripts/sync-to-d1.js"
   },
   "engines": {
     "node": ">=18"

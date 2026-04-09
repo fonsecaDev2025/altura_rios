@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: altura-rios
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+
+  - type: cron
+    name: sync-d1-diario
+    runtime: node
+    buildCommand: npm install
+    startCommand: node scripts/sync-to-d1.js
+    schedule: "0 12 * * *"
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: CF_API_TOKEN
+        sync: false
+      - key: CF_ACCOUNT_ID
+        value: "d9499103cc4d4926c16b60e7aaa9fa3e"
+      - key: CF_D1_DATABASE_ID
+        value: "46b6e6ad-0671-4fa4-bf4d-6d1d30af3db3"
+      - key: API_BASE_URL
+        value: "https://altura-rios.onrender.com"

@@ -2,7 +2,11 @@
  * Vista independiente: GET /api/rio-paraguay-dmh
  */
 
-const API = "/api/rio-paraguay-dmh";
+function apiParaguayUrl() {
+  return typeof resolveApiUrl !== "undefined"
+    ? resolveApiUrl("/api/rio-paraguay-dmh")
+    : "/api/rio-paraguay-dmh";
+}
 
 const el = {
   statusPanel: document.getElementById("status-panel"),
@@ -108,10 +112,17 @@ async function load() {
   setLoading(true);
   clearError();
   try {
-    const res = await fetch(API, { headers: { Accept: "application/json" } });
+    const res = await fetch(apiParaguayUrl(), {
+      headers: { Accept: "application/json" },
+    });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
-      setError(data.error || `Error HTTP ${res.status}`);
+      setError(
+        data.error ||
+          (typeof formatApiHttpError !== "undefined"
+            ? formatApiHttpError(res.status, "/api/rio-paraguay-dmh")
+            : `Error HTTP ${res.status}`)
+      );
       el.metaSection.hidden = true;
       el.tableRoot.innerHTML = "";
       renderWarnings([]);
