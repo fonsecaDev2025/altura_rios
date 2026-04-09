@@ -14,6 +14,7 @@ const {
   saveParaguayExtraccion,
 } = require("./db");
 const { parseRioParaguay } = require("./lib/paraguayConvencional");
+const { parseAlturasHtml } = require("./lib/pnaHtmlParser");
 
 const PARAGUAY_DMH_URL =
   "https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php";
@@ -203,6 +204,40 @@ async function scrapeAlturasOnce() {
   }
 }
 
+async function fetchAlturasFallback() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(TARGET_URL, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "es-AR,es;q=0.9",
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`PNA HTTP ${res.status}`);
+    const html = await res.text();
+    const items = parseAlturasHtml(html);
+    const warnings = ["Datos obtenidos con fallback (fetch + regex, sin Puppeteer)."];
+    if (!items.length) {
+      warnings.push(
+        "No se obtuvieron filas con el parser regex. ¿Cambió el HTML de PNA?"
+      );
+    }
+    return {
+      source: TARGET_URL,
+      scrapedAt: new Date().toISOString(),
+      count: items.length,
+      items,
+      warnings,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function scrapeAlturas() {
   let lastError = null;
   for (let attempt = 1; attempt <= SCRAPE_RETRIES; attempt += 1) {
@@ -225,7 +260,13 @@ async function scrapeAlturas() {
       }
     }
   }
-  throw lastError || new Error("Scraping fallido: error desconocido.");
+  console.warn("[scrapeAlturas] Puppeteer agotado, usando fallback fetch+regex…");
+  try {
+    return await fetchAlturasFallback();
+  } catch (fbErr) {
+    console.error("[fallback]", fbErr);
+    throw lastError || fbErr;
+  }
 }
 
 app.use(express.static(path.join(__dirname, "public")));
