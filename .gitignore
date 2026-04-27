@@ -1,2 +1,7 @@
 node_modules/
 data/*.sqlite
+__pycache__/
+*.pyc
+croniter.pid
+croniter_daily.log
+.croniter_daily_last_run

@@ -21,5 +21,8 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "@google/design.md": "^0.1.1"
+  }
 }

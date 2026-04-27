@@ -1,0 +1,16 @@
+[Unit]
+Description=Daemon diario de alturas de rios (SQLite)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hector
+WorkingDirectory=/home/hector/altura_rios
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/hector/altura_rios/croniter_daily.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
