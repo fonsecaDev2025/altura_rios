@@ -95,6 +95,24 @@ def is_target_minute(now: datetime, target_hour: int, target_minute: int) -> boo
     return now.hour == target_hour and now.minute == target_minute
 
 
+def slot_datetime_for_day(day: date, target_hour: int, target_minute: int) -> datetime:
+    return datetime(day.year, day.month, day.day, target_hour, target_minute, 0, 0)
+
+
+def should_run_daily_catch_up(
+    now: datetime, target_hour: int, target_minute: int, last_run_day: date | None
+) -> bool:
+    """
+    Ejecutar hoy si aún no se registró corrida para hoy y ya pasó la hora objetivo.
+    Cubre máquinas que arrancan después de ese minuto o servicio reiniciado tarde.
+    """
+    today = now.date()
+    if last_run_day == today:
+        return False
+    slot_today = slot_datetime_for_day(today, target_hour, target_minute)
+    return now >= slot_today
+
+
 def seconds_until_next_tick(target_hour: int, target_minute: int, now: datetime) -> float:
     """Tiempo hasta la próxima ocurrencia de target en el mismo día (o mañana)."""
     today_run = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
@@ -204,15 +222,22 @@ def main() -> None:
             now = datetime.now()
             today = now.date()
 
-            if is_target_minute(now, target_hour, target_minute):
-                last = read_last_run_day()
-                if last != today:
-                    result = execute_daily_task()
-                    log_execution_summary(result)
-                    if result["status"] == "completed":
-                        write_last_run_day(today)
-                # Dormir el resto del minuto para no repetir en el mismo minuto si CHECK_INTERVAL es bajo
-                time.sleep(max(1.0, 60.0 - now.second))
+            last = read_last_run_day()
+            hit_target_minute = is_target_minute(now, target_hour, target_minute)
+            do_run = hit_target_minute and last != today
+            if not do_run and last != today:
+                do_run = should_run_daily_catch_up(now, target_hour, target_minute, last)
+
+            if do_run:
+                result = execute_daily_task()
+                log_execution_summary(result)
+                if result["status"] == "completed":
+                    write_last_run_day(today)
+                if hit_target_minute:
+                    # Dormir el resto del minuto para no repetir en el mismo minuto si CHECK_INTERVAL es bajo
+                    time.sleep(max(1.0, 60.0 - now.second))
+                else:
+                    time.sleep(float(CHECK_INTERVAL))
             else:
                 if CHECK_INTERVAL > 60:
                     wait = min(

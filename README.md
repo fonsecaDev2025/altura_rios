@@ -2,7 +2,7 @@
 
 Dashboard web para consultar alturas hidrométricas de ríos, con datos obtenidos desde fuentes públicas de FICH/UNL y DMH Paraguay.
 
-El proyecto incluye un servidor Express, una interfaz web estática, parsers livianos basados en HTML, persistencia local con SQLite y scripts de sincronización hacia Cloudflare D1.
+El proyecto incluye un servidor Express, una interfaz web estática, parsers livianos basados en HTML y persistencia local con SQLite.
 
 ## Características
 
@@ -10,7 +10,7 @@ El proyecto incluye un servidor Express, una interfaz web estática, parsers liv
 - Vista separada para estaciones convencionales del Río Paraguay publicadas por DMH Paraguay.
 - API REST para consultar datos en formato JSON.
 - Persistencia diaria en SQLite.
-- Scripts para importar históricos y sincronizar datos con Cloudflare D1.
+- Scripts para importar históricos y actualizar datos locales.
 - Configuración lista para desplegar en Render.
 
 ## Tecnologías
@@ -79,12 +79,6 @@ npm run sync:paraguay
 
 Descarga datos de DMH Paraguay y los guarda en SQLite.
 
-```bash
-npm run sync:d1
-```
-
-Sincroniza datos de FICH/UNL y DMH Paraguay hacia Cloudflare D1.
-
 ## API
 
 ### Salud del servicio
@@ -113,7 +107,7 @@ Obtiene estaciones convencionales del Río Paraguay desde DMH Paraguay y guarda 
 
 ## Variables de entorno
 
-El proyecto funciona localmente sin configuración adicional, pero estas variables permiten personalizar rutas, CORS, tiempos de espera y sincronización:
+El proyecto funciona localmente sin configuración adicional, pero estas variables permiten personalizar rutas, CORS, tiempos de espera y sincronización local:
 
 | Variable | Descripción | Valor por defecto |
 | --- | --- | --- |
@@ -124,10 +118,6 @@ El proyecto funciona localmente sin configuración adicional, pero estas variabl
 | `SQLITE_PATH` | Ruta de la base SQLite principal | `data/alturas.sqlite` |
 | `PARAGUAY_SQLITE_PATH` | Ruta de la base SQLite de DMH Paraguay | `data/paraguay_dmh.sqlite` |
 | `DAILY_COMMAND` | Comando diario usado por `croniter_daily.py` | `npm run sync:paraguay` |
-| `API_BASE_URL` | URL base usada por la sincronización D1 | `https://altura-rios.onrender.com` |
-| `CF_API_TOKEN` | Token de Cloudflare con permisos para D1 | requerido para `sync:d1` |
-| `CF_ACCOUNT_ID` | Account ID de Cloudflare | configurado en el script |
-| `CF_D1_DATABASE_ID` | ID de la base Cloudflare D1 | configurado en el script |
 
 ## Persistencia local
 
@@ -160,9 +150,9 @@ También se incluye `croniter_daily.service` para usarlo como servicio systemd.
 El archivo `render.yaml` define:
 
 - Un servicio web Node.js para la aplicación.
-- Un cron job diario para sincronizar datos hacia Cloudflare D1.
+- Un cron job diario para ejecutar tareas programadas.
 
-Para desplegar en Render, conectá el repositorio y configurá las variables sensibles, especialmente `CF_API_TOKEN`.
+Para desplegar en Render, conectá el repositorio y configurá las variables de entorno necesarias para tu entorno.
 
 ## Fuentes de datos
 
