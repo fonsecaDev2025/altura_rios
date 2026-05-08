@@ -8,6 +8,8 @@
     "build:pages": "node scripts/gen-pages-config.cjs",
     "start": "node server.js",
     "dev": "node server.js",
+    "lint": "eslint .",
+    "test": "node --test 'test/*.test.js'",
     "import:historico": "node scripts/importHistorico.js",
     "sync:paraguay": "node scripts/syncParaguayDmh.js"
   },
@@ -22,6 +24,8 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "@google/design.md": "^0.1.1"
+    "@eslint/js": "^10.0.1",
+    "@google/design.md": "^0.1.1",
+    "eslint": "^10.3.0"
   }
 }

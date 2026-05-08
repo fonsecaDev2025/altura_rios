@@ -19,8 +19,8 @@
     var host = "";
     try {
       host = typeof location !== "undefined" ? location.hostname : "";
-    } catch (e) {
-      host = "";
+    } catch (_e) {
+      /* location puede lanzar en entornos restringidos */
     }
     var soloEstaticoCf =
       /\.pages\.dev$/i.test(host) ||

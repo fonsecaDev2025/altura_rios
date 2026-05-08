@@ -61,18 +61,30 @@ function sleep(ms) {
 }
 
 async function fetchRioParaguayDmh() {
-  const res = await fetch(PARAGUAY_DMH_URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      Accept: "text/html,application/xhtml+xml",
-      "Accept-Language": "es-PY,es;q=0.9",
-    },
-  });
+  let res;
+  try {
+    res = await fetch(PARAGUAY_DMH_URL, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "es-PY,es;q=0.9",
+      },
+    });
+  } catch (err) {
+    throw new Error(`DMH Paraguay: error de red – ${err.message}`, { cause: err });
+  }
   if (!res.ok) {
     throw new Error(`DMH Paraguay: HTTP ${res.status}`);
   }
-  const html = await res.text();
+
+  let html;
+  try {
+    html = await res.text();
+  } catch (err) {
+    throw new Error(`DMH Paraguay: error leyendo cuerpo – ${err.message}`, { cause: err });
+  }
+
   const items = parseRioParaguay(html);
   const warnings = [];
   if (!items.length) {
@@ -243,3 +255,18 @@ function listenWithFallback(port, attemptsLeft) {
 }
 
 listenWithFallback(BASE_PORT, PORT_TRY_LIMIT);
+
+/* ─── Manejo global de errores no capturados ─── */
+process.on("unhandledRejection", (reason, _promise) => {
+  console.error("[unhandledRejection]", reason);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+  // Cierre ordenado: dejar de aceptar conexiones y salir.
+  server.close(() => {
+    process.exit(1);
+  });
+  // Si el cierre tarda más de 5 s, forzar salida.
+  setTimeout(() => process.exit(1), 5000).unref();
+});
