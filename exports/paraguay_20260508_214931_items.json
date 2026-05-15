@@ -1,0 +1,146 @@
+[
+  {
+    "localidad": "Puerto Ladario - Brasil",
+    "fecha": "07-05-2026",
+    "nivelDelDia": "2.06 m",
+    "variacionDiaria": "-2 cm",
+    "minimoHistoricoFecha": "-0.68m --> 16-10-2024",
+    "maximoHistoricoFecha": "4.24m --> 18-07-2023",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000082001"
+  },
+  {
+    "localidad": "Puerto Murtinho - Brasil",
+    "fecha": "07-05-2026",
+    "nivelDelDia": "3.17 m",
+    "variacionDiaria": "1 cm",
+    "minimoHistoricoFecha": "0.53m --> 24-10-2024",
+    "maximoHistoricoFecha": "9.75m --> 26-06-1982",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000082002"
+  },
+  {
+    "localidad": "Cáceres - Brasil",
+    "fecha": "07-05-2026",
+    "nivelDelDia": "3.01 m",
+    "variacionDiaria": "-11 cm",
+    "minimoHistoricoFecha": "0.26m --> 27-09-2021",
+    "maximoHistoricoFecha": "5.47m --> 29-03-2023",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000082003"
+  },
+  {
+    "localidad": "Isla Margarita",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.17 m",
+    "variacionDiaria": "1 cm",
+    "minimoHistoricoFecha": "0.54m --> 23-10-2024",
+    "maximoHistoricoFecha": "7.70m --> 12-03-2018",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086009"
+  },
+  {
+    "localidad": "Fuerte Olimpo",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.98 m",
+    "variacionDiaria": "0 cm",
+    "minimoHistoricoFecha": "-1.58m --> 26-10-1971",
+    "maximoHistoricoFecha": "9.60m --> 09-06-1988",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086010"
+  },
+  {
+    "localidad": "Bahía Negra",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.83 m",
+    "variacionDiaria": "0 cm",
+    "minimoHistoricoFecha": "-1.32m --> 26-09-1971",
+    "maximoHistoricoFecha": "6.95m --> 13-06-1982",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086033"
+  },
+  {
+    "localidad": "Vallemi",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.10 m",
+    "variacionDiaria": "3 cm",
+    "minimoHistoricoFecha": "0.42m --> 24-09-1971",
+    "maximoHistoricoFecha": "8.56m --> 24-06-1982",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086088"
+  },
+  {
+    "localidad": "Concepción",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.06 m",
+    "variacionDiaria": "-1 cm",
+    "minimoHistoricoFecha": "0.34m --> 07-01-1968",
+    "maximoHistoricoFecha": "8.66m --> 20-05-1992",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086134"
+  },
+  {
+    "localidad": "Rosario",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.26 m",
+    "variacionDiaria": "6 cm",
+    "minimoHistoricoFecha": "-0.62m --> 30-10-2024",
+    "maximoHistoricoFecha": "8.03m --> 03-06-1983",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086183"
+  },
+  {
+    "localidad": "Puerto Antequera",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.07 m",
+    "variacionDiaria": "4 cm",
+    "minimoHistoricoFecha": "-0.49m --> 31-10-2024",
+    "maximoHistoricoFecha": "6.02m --> 17-03-2023",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086184"
+  },
+  {
+    "localidad": "Villeta",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.60 m",
+    "variacionDiaria": "5 cm",
+    "minimoHistoricoFecha": "-1.21m --> 01-11-2024",
+    "maximoHistoricoFecha": "8.94m --> 30-05-1983",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086211"
+  },
+  {
+    "localidad": "Asunción",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.18 m",
+    "variacionDiaria": "7 cm",
+    "minimoHistoricoFecha": "-1.61m --> 02-11-2024",
+    "maximoHistoricoFecha": "9.01m --> 29-05-1983",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086218"
+  },
+  {
+    "localidad": "Ita Enramada",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.64 m",
+    "variacionDiaria": "4 cm",
+    "minimoHistoricoFecha": "-1.04m --> 01-11-2024",
+    "maximoHistoricoFecha": "5.80m --> 26-03-2023",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086219"
+  },
+  {
+    "localidad": "Humaitá",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "3.32 m",
+    "variacionDiaria": "12 cm",
+    "minimoHistoricoFecha": "-0.25m --> 02-10-2021",
+    "maximoHistoricoFecha": "7.74m --> 07-06-2019",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086252"
+  },
+  {
+    "localidad": "Alberdi",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "4.98 m",
+    "variacionDiaria": "4 cm",
+    "minimoHistoricoFecha": "-0.77m --> 08-11-2024",
+    "maximoHistoricoFecha": "10.14m --> 10-06-1992",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086254"
+  },
+  {
+    "localidad": "Pilar",
+    "fecha": "08-05-2026",
+    "nivelDelDia": "4.70 m",
+    "variacionDiaria": "2 cm",
+    "minimoHistoricoFecha": "-0.49m --> 06-10-1944",
+    "maximoHistoricoFecha": "10.05m --> 29-05-1983",
+    "verMasUrl": "https://www.meteorologia.gov.py/nivel-rio/vermas_convencional.php?code=2000086255"
+  }
+]
