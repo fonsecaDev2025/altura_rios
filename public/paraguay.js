@@ -80,8 +80,6 @@ function renderTable(items) {
           <th>Fecha</th>
           <th>Nivel del día</th>
           <th>Variación diaria</th>
-          <th>Mín. histórico</th>
-          <th>Máx. histórico</th>
           <th></th>
         </tr>
       </thead>
@@ -98,8 +96,6 @@ function renderTable(items) {
           <td class="num">${escapeHtml(row.fecha)}</td>
           <td class="num">${escapeHtml(row.nivelDelDia)}</td>
           <td class="num">${escapeHtml(row.variacionDiaria)}</td>
-          <td>${escapeHtml(row.minimoHistoricoFecha)}</td>
-          <td>${escapeHtml(row.maximoHistoricoFecha)}</td>
           <td>${link}</td>
         </tr>`;
     })

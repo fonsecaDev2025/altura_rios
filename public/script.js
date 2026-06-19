@@ -118,8 +118,6 @@ function renderTable() {
           <th>Variación</th>
           <th>Estado</th>
           <th>Alt. anterior</th>
-          <th>Alerta</th>
-          <th>Evacuación</th>
           <th>Hist.</th>
         </tr>
       </thead>
@@ -139,8 +137,6 @@ function renderTable() {
           <td data-label="Variación" class="num">${escapeHtml(row.variacion)}</td>
           <td data-label="Estado"><span class="${estadoClass(row.estado)}">${escapeHtml(row.estado)}</span></td>
           <td data-label="Alt. ant." class="num">${escapeHtml(row.alturaAnterior)}</td>
-          <td data-label="Alerta" class="num">${escapeHtml(row.alerta)}</td>
-          <td data-label="Evac." class="num">${escapeHtml(row.evacuacion)}</td>
           <td data-label="Hist.">${hist}</td>
         </tr>`;
     })
