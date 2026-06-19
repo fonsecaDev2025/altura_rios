@@ -1,5 +1,7 @@
 node_modules/
 data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
 __pycache__/
 *.pyc
 croniter.pid

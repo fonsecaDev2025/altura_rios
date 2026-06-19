@@ -3,10 +3,13 @@
  * items: puerto, rio, altura, variacion, estado, alturaAnterior, alerta, evacuacion
  */
 
-function apiDataUrl() {
-  return typeof resolveApiUrl !== "undefined"
-    ? resolveApiUrl("/api/data")
-    : "/api/data";
+function apiDataUrl(forceRefresh = false) {
+  const base =
+    typeof resolveApiUrl !== "undefined"
+      ? resolveApiUrl("/api/data")
+      : "/api/data";
+  if (!forceRefresh) return base;
+  return base + (base.includes("?") ? "&" : "?") + "refresh=1";
 }
 
 const el = {
@@ -153,7 +156,7 @@ function renderTable() {
 
 const FETCH_MS = 60000;
 
-async function fetchData() {
+async function fetchData(forceRefresh = false) {
   setLoading(true);
   clearErrorState();
 
@@ -161,7 +164,7 @@ async function fetchData() {
   const timeoutId = setTimeout(() => controller.abort(), FETCH_MS);
 
   try {
-    const res = await fetch(apiDataUrl(), {
+    const res = await fetch(apiDataUrl(forceRefresh), {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
@@ -183,7 +186,14 @@ async function fetchData() {
       return;
     }
 
-    el.statusText.textContent = "Datos cargados correctamente.";
+    if (data.cached) {
+      const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
+      el.statusText.textContent = data.stale
+        ? `Fuente no disponible. Mostrando datos en caché (hace ~${mins} min).`
+        : `Datos en caché (hace ~${mins} min). Tocá «Actualizar» para refrescar.`;
+    } else {
+      el.statusText.textContent = "Datos actualizados correctamente.";
+    }
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderMeta(data);
     renderWarnings(data.warnings);
@@ -205,9 +215,9 @@ async function fetchData() {
   }
 }
 
-el.btnRefresh.addEventListener("click", fetchData);
+el.btnRefresh.addEventListener("click", () => fetchData(true));
 el.filterInput.addEventListener("input", () => renderTable());
 
 document.addEventListener("DOMContentLoaded", () => {
-  fetchData();
+  fetchData(false);
 });

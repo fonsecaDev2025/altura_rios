@@ -15,10 +15,8 @@ before(() => {
 });
 
 after(() => {
-  // Limpiar archivos de test
-  try { fs.unlinkSync(TEST_DB_PATH); } catch (_e) { /* ok */ }
-  try { fs.unlinkSync(TEST_PY_PATH); } catch (_e) { /* ok */ }
-  try { fs.rmdirSync(TEST_DATA_DIR); } catch (_e) { /* ok */ }
+  // Limpiar archivos de test (incluye -wal/-shm que crea el modo WAL)
+  try { fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true }); } catch (_e) { /* ok */ }
 });
 
 // Requiere db.js DESPUÉS de establecer env vars
@@ -74,6 +72,31 @@ describe("saveUltimaExtraccionDelDia", () => {
     ];
     const result = saveUltimaExtraccionDelDia(items, "2026-05-08T12:00:00Z");
     assert.equal(result.rowsSaved, 0);
+  });
+});
+
+describe("snapshots (caché)", () => {
+  it("guarda y recupera el último snapshot por fuente", () => {
+    const { saveSnapshot, getLatestSnapshot } = loadDb();
+    const payload = { source: "x", count: 2, items: [{ a: 1 }, { b: 2 }] };
+    saveSnapshot("parana", "2026-05-08T12:00:00Z", payload);
+    const snap = getLatestSnapshot("parana");
+    assert.ok(snap);
+    assert.equal(snap.scrapedAt, "2026-05-08T12:00:00Z");
+    assert.deepEqual(snap.payload, payload);
+  });
+
+  it("devuelve el snapshot más reciente cuando hay varios", () => {
+    const { saveSnapshot, getLatestSnapshot } = loadDb();
+    saveSnapshot("parana", "2026-05-08T18:00:00Z", { count: 9 });
+    const snap = getLatestSnapshot("parana");
+    assert.equal(snap.scrapedAt, "2026-05-08T18:00:00Z");
+    assert.equal(snap.payload.count, 9);
+  });
+
+  it("aísla snapshots por fuente y devuelve null si no hay", () => {
+    const { getLatestSnapshot } = loadDb();
+    assert.equal(getLatestSnapshot("inexistente"), null);
   });
 });
 

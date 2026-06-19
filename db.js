@@ -26,6 +26,9 @@ function initDb() {
   if (db) return db;
   fs.mkdirSync(dbDir, { recursive: true });
   db = new Database(dbPath);
+  // WAL: permite leer mientras se escribe sin bloqueos (mejor para servir caché).
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS extracciones_dia (
       fecha_dia TEXT NOT NULL,
@@ -37,8 +40,71 @@ function initDb() {
       extracted_at TEXT NOT NULL,
       PRIMARY KEY (fecha_dia, puerto)
     );
+    CREATE TABLE IF NOT EXISTS snapshots (
+      source TEXT NOT NULL,
+      scraped_at TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      PRIMARY KEY (source, scraped_at)
+    );
+    CREATE INDEX IF NOT EXISTS idx_snapshots_source_time
+      ON snapshots (source, scraped_at DESC);
   `);
   return db;
+}
+
+/**
+ * Guarda el payload completo de una extracción como snapshot JSON.
+ * Sirve de caché para responder rápido y como respaldo si la fuente falla.
+ * Conserva los últimos 50 snapshots por fuente.
+ */
+function saveSnapshot(source, scrapedAtIso, payload) {
+  const database = initDb();
+  database
+    .prepare(
+      `INSERT INTO snapshots (source, scraped_at, payload_json)
+       VALUES (@source, @scraped_at, @payload_json)
+       ON CONFLICT(source, scraped_at) DO UPDATE SET
+         payload_json = excluded.payload_json`
+    )
+    .run({
+      source,
+      scraped_at: scrapedAtIso,
+      payload_json: JSON.stringify(payload),
+    });
+
+  database
+    .prepare(
+      `DELETE FROM snapshots
+       WHERE source = @source
+         AND scraped_at NOT IN (
+           SELECT scraped_at FROM snapshots
+           WHERE source = @source
+           ORDER BY scraped_at DESC
+           LIMIT 50
+         )`
+    )
+    .run({ source });
+
+  return { source, scrapedAt: scrapedAtIso };
+}
+
+/** Devuelve el último snapshot de una fuente: { scrapedAt, payload } o null. */
+function getLatestSnapshot(source) {
+  const database = initDb();
+  const row = database
+    .prepare(
+      `SELECT scraped_at, payload_json FROM snapshots
+       WHERE source = @source
+       ORDER BY scraped_at DESC
+       LIMIT 1`
+    )
+    .get({ source });
+  if (!row) return null;
+  try {
+    return { scrapedAt: row.scraped_at, payload: JSON.parse(row.payload_json) };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -192,6 +258,8 @@ function saveParaguayExtraccion(items, scrapedAtIso) {
 module.exports = {
   initDb,
   saveUltimaExtraccionDelDia,
+  saveSnapshot,
+  getLatestSnapshot,
   dbPath,
   initDbParaguay,
   saveParaguayExtraccion,

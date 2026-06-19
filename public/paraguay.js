@@ -2,10 +2,13 @@
  * Vista independiente: GET /api/rio-paraguay-dmh
  */
 
-function apiParaguayUrl() {
-  return typeof resolveApiUrl !== "undefined"
-    ? resolveApiUrl("/api/rio-paraguay-dmh")
-    : "/api/rio-paraguay-dmh";
+function apiParaguayUrl(forceRefresh = false) {
+  const base =
+    typeof resolveApiUrl !== "undefined"
+      ? resolveApiUrl("/api/rio-paraguay-dmh")
+      : "/api/rio-paraguay-dmh";
+  if (!forceRefresh) return base;
+  return base + (base.includes("?") ? "&" : "?") + "refresh=1";
 }
 
 const el = {
@@ -104,11 +107,11 @@ function renderTable(items) {
   el.tableRoot.innerHTML = `<div class="table-scroll">${head}${body}</tbody></table></div>`;
 }
 
-async function load() {
+async function load(forceRefresh = false) {
   setLoading(true);
   clearError();
   try {
-    const res = await fetch(apiParaguayUrl(), {
+    const res = await fetch(apiParaguayUrl(forceRefresh), {
       headers: { Accept: "application/json" },
     });
     const data = await res.json().catch(() => ({}));
@@ -124,7 +127,14 @@ async function load() {
       renderWarnings([]);
       return;
     }
-    el.statusText.textContent = "Listo.";
+    if (data.cached) {
+      const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
+      el.statusText.textContent = data.stale
+        ? `Fuente no disponible. Mostrando datos en caché (hace ~${mins} min).`
+        : `Datos en caché (hace ~${mins} min). Tocá «Actualizar» para refrescar.`;
+    } else {
+      el.statusText.textContent = "Datos actualizados correctamente.";
+    }
     el.metaSection.hidden = false;
     el.metaTime.textContent = formatWhen(data.scrapedAt);
     el.metaCount.textContent = String(data.count ?? 0);
@@ -146,5 +156,5 @@ async function load() {
   }
 }
 
-el.btnRefresh.addEventListener("click", load);
-document.addEventListener("DOMContentLoaded", load);
+el.btnRefresh.addEventListener("click", () => load(true));
+document.addEventListener("DOMContentLoaded", () => load(false));

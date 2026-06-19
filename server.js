@@ -21,6 +21,8 @@ const rateLimit = require("express-rate-limit");         // [2]
 const {
   initDb,
   saveUltimaExtraccionDelDia,
+  saveSnapshot,
+  getLatestSnapshot,
   initDbParaguay,
   saveParaguayExtraccion,
 } = require("./db");
@@ -92,13 +94,24 @@ const apiLimiter = rateLimit({
 });
 app.use("/api/", apiLimiter);
 
-// 5 req / min para endpoints que disparan scraping externo
+// 5 req / min para endpoints que disparan scraping externo.
+// Las respuestas servidas desde caché fresca NO cuentan: no golpean la fuente.
 const scrapeLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { ok: false, error: "Límite de actualizaciones por minuto alcanzado." },
+  skip: (req) => {
+    if (wantsRefresh(req)) return false; // refresco forzado siempre cuenta
+    try {
+      const source = /paraguay/i.test(req.originalUrl) ? "paraguay" : "parana";
+      const snap = getLatestSnapshot(source);
+      return !!(snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS);
+    } catch {
+      return false;
+    }
+  },
 });
 app.use("/api/data", scrapeLimiter);
 app.use("/api/rio-paraguay-dmh", scrapeLimiter);
@@ -110,6 +123,20 @@ const PORT_TRY_LIMIT = 15;
 const TARGET_URL = "http://wfich1.unl.edu.ar/cim/rios/parana/alturas";
 const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 30000;
 const FETCH_RETRIES = Math.max(1, Number(process.env.FETCH_RETRIES) || 2);
+
+// ─── Caché de snapshots ───────────────────────────────────────────────────────
+// TTL: si el último snapshot es más nuevo que esto, se sirve sin scrapear.
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS) || 10 * 60 * 1000;
+
+function snapshotAgeMs(scrapedAtIso) {
+  const t = Date.parse(scrapedAtIso);
+  return Number.isNaN(t) ? Infinity : Date.now() - t;
+}
+
+function wantsRefresh(req) {
+  const v = req.query.refresh;
+  return v === "1" || v === "true";
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -249,6 +276,26 @@ try {
 
 // ─── Rutas API ────────────────────────────────────────────────────────────────
 app.get("/api/data", async (req, res) => {
+  const SOURCE = "parana";
+
+  // [1] Servir caché fresca (salvo que se pida ?refresh=1)
+  if (!wantsRefresh(req)) {
+    try {
+      const snap = getLatestSnapshot(SOURCE);
+      if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
+        return res.json({
+          ok: true,
+          ...snap.payload,
+          cached: true,
+          cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
+        });
+      }
+    } catch (e) {
+      console.warn("[cache parana] lectura falló:", e.message);
+    }
+  }
+
+  // [2] Scrapeo en vivo
   try {
     const data = await fetchAlturas();
     let dbSaved = null;
@@ -260,9 +307,40 @@ app.get("/api/data", async (req, res) => {
         data.warnings.push(`SQLite: ${dbErr.message}`);
       }
     }
-    res.json({ ok: true, ...data, dbSaved });
+    try {
+      saveSnapshot(SOURCE, data.scrapedAt, data);
+    } catch (snapErr) {
+      console.warn("[cache parana] guardado falló:", snapErr.message);
+    }
+    res.json({ ok: true, ...data, dbSaved, cached: false });
   } catch (err) {
     console.error("[/api/data]", err);
+
+    // [3] Fallback: último snapshot disponible aunque esté vencido
+    try {
+      const snap = getLatestSnapshot(SOURCE);
+      if (snap) {
+        const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
+        const payload = snap.payload || {};
+        const warnings = Array.isArray(payload.warnings)
+          ? payload.warnings.slice()
+          : [];
+        warnings.push(
+          `No se pudo actualizar desde la fuente (${err.message}). Mostrando datos cacheados de hace ~${ageMin} min.`
+        );
+        return res.json({
+          ...payload,
+          ok: true,
+          warnings,
+          cached: true,
+          stale: true,
+          cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
+        });
+      }
+    } catch (e) {
+      console.warn("[cache parana] fallback falló:", e.message);
+    }
+
     res.status(500).json({
       ok: false,
       error: err.message || "Error interno al obtener datos",
@@ -271,7 +349,27 @@ app.get("/api/data", async (req, res) => {
   }
 });
 
-app.get("/api/rio-paraguay-dmh", async (_req, res) => {
+app.get("/api/rio-paraguay-dmh", async (req, res) => {
+  const SOURCE = "paraguay";
+
+  // [1] Servir caché fresca (salvo que se pida ?refresh=1)
+  if (!wantsRefresh(req)) {
+    try {
+      const snap = getLatestSnapshot(SOURCE);
+      if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
+        return res.json({
+          ok: true,
+          ...snap.payload,
+          cached: true,
+          cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
+        });
+      }
+    } catch (e) {
+      console.warn("[cache paraguay] lectura falló:", e.message);
+    }
+  }
+
+  // [2] Scrapeo en vivo
   try {
     const data = await fetchRioParaguayDmh();
     let dbSaved = null;
@@ -286,9 +384,40 @@ app.get("/api/rio-paraguay-dmh", async (_req, res) => {
         data.warnings.push(`SQLite Paraguay: ${dbErr.message}`);
       }
     }
-    res.json({ ok: true, ...data, dbSaved });
+    try {
+      saveSnapshot(SOURCE, data.scrapedAt, data);
+    } catch (snapErr) {
+      console.warn("[cache paraguay] guardado falló:", snapErr.message);
+    }
+    res.json({ ok: true, ...data, dbSaved, cached: false });
   } catch (err) {
     console.error("[/api/rio-paraguay-dmh]", err);
+
+    // [3] Fallback: último snapshot disponible aunque esté vencido
+    try {
+      const snap = getLatestSnapshot(SOURCE);
+      if (snap) {
+        const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
+        const payload = snap.payload || {};
+        const warnings = Array.isArray(payload.warnings)
+          ? payload.warnings.slice()
+          : [];
+        warnings.push(
+          `No se pudo actualizar desde la fuente (${err.message}). Mostrando datos cacheados de hace ~${ageMin} min.`
+        );
+        return res.json({
+          ...payload,
+          ok: true,
+          warnings,
+          cached: true,
+          stale: true,
+          cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
+        });
+      }
+    } catch (e) {
+      console.warn("[cache paraguay] fallback falló:", e.message);
+    }
+
     res.status(500).json({
       ok: false,
       error: err.message || "Error al obtener datos DMH",
