@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pasos y profundidades de los ríos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+      media="print"
+      data-font-async
+    />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700&family=Fraunces:opsz,wght@9..144,600&family=JetBrains+Mono:wght@400;600&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
+    <script src="fonts.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-bg" aria-hidden="true"></div>
+    <header class="hero">
+      <h1 class="hero__title">Pasos y profundidades de los ríos</h1>
+      <p class="hero__sub">
+        Carga manual de pasos, profundidades y alturas relevadas durante la navegación.
+      </p>
+      <div class="hero__actions" id="hero-actions" hidden>
+        <span class="user-chip" id="user-chip"></span>
+        <button type="button" class="btn" id="btn-new">Nuevo registro</button>
+        <button type="button" class="btn btn--ghost" id="btn-refresh">Actualizar</button>
+        <button type="button" class="btn btn--ghost" id="btn-logout">Cerrar sesión</button>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Secciones">
+      <a href="/" class="tabs__item">Rio Paraná</a>
+      <a href="/paraguay.html" class="tabs__item">Rio Paraguay</a>
+      <a href="/pasos.html" class="tabs__item tabs__item--current" aria-current="page"
+        >Pasos y profundidades</a
+      >
+    </nav>
+
+    <main class="main">
+      <section class="status" id="status-panel" aria-live="polite">
+        <p class="status__text" id="status-text">Cargando…</p>
+      </section>
+
+      <section class="auth-card" id="auth-card" hidden>
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab auth-tab--current" id="tab-login">
+            Iniciar sesión
+          </button>
+          <button type="button" class="auth-tab" id="tab-register">Crear cuenta</button>
+        </div>
+        <form id="auth-form" novalidate>
+          <div class="field">
+            <label class="field__label" for="auth-username">Usuario</label>
+            <input
+              type="text"
+              id="auth-username"
+              class="field__input"
+              autocomplete="username"
+              placeholder="tu_usuario"
+              required
+            />
+          </div>
+          <div class="field">
+            <label class="field__label" for="auth-password">Contraseña</label>
+            <input
+              type="password"
+              id="auth-password"
+              class="field__input"
+              autocomplete="current-password"
+              placeholder="••••••"
+              required
+            />
+          </div>
+          <p class="form-error" id="auth-error" hidden></p>
+          <div class="form-actions">
+            <button type="submit" class="btn" id="auth-submit">Entrar</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="form-card" id="form-card" hidden>
+        <h2 class="form-card__title" id="form-title">Nuevo registro</h2>
+        <form id="paso-form" novalidate>
+          <input type="hidden" id="field-id" />
+          <div class="form-grid">
+            <div class="field">
+              <label class="field__label" for="field-fecha">Fecha *</label>
+              <input type="date" id="field-fecha" class="field__input" required />
+            </div>
+            <div class="field">
+              <label class="field__label" for="field-puerto">Puerto *</label>
+              <input
+                type="text"
+                id="field-puerto"
+                class="field__input"
+                placeholder="Ej.: San Lorenzo"
+                autocomplete="off"
+                required
+              />
+            </div>
+            <div class="field">
+              <label class="field__label" for="field-altura">Altura</label>
+              <input
+                type="text"
+                id="field-altura"
+                class="field__input"
+                placeholder="Ej.: 2,41"
+                autocomplete="off"
+              />
+            </div>
+            <div class="field">
+              <label class="field__label" for="field-paso">Paso</label>
+              <input
+                type="text"
+                id="field-paso"
+                class="field__input"
+                placeholder="Ej.: Km 488 M/D"
+                autocomplete="off"
+              />
+            </div>
+            <div class="field">
+              <label class="field__label" for="field-profundidad">Profundidad</label>
+              <input
+                type="text"
+                id="field-profundidad"
+                class="field__input"
+                placeholder="Ej.: 0,80 16'00&quot;"
+                autocomplete="off"
+              />
+            </div>
+            <div class="field">
+              <label class="field__label" for="field-ancho">Ancho</label>
+              <input
+                type="text"
+                id="field-ancho"
+                class="field__input"
+                placeholder="Ej.: 1,30 M/D"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+          <p class="form-error" id="form-error" hidden></p>
+          <div class="form-actions">
+            <button type="submit" class="btn" id="btn-save">Guardar</button>
+            <button type="button" class="btn btn--ghost" id="btn-cancel">Cancelar</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="table-wrap" id="table-root"></section>
+    </main>
+
+    <footer class="footer">
+      <span>Datos almacenados localmente · API <code>/api/pasos</code></span>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="api-resolve.js"></script>
+    <script src="pasos.js"></script>
+  </body>
+</html>

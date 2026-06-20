@@ -26,6 +26,19 @@ const {
   initDbParaguay,
   saveParaguayExtraccion,
 } = require("./db");
+const {
+  initDbPasos,
+  createUser,
+  authenticate,
+  createSession,
+  getUserBySession,
+  deleteSession,
+  listPasos,
+  createPaso,
+  updatePaso,
+  deletePaso,
+  SESSION_TTL_MS,
+} = require("./dbPasos");
 const { parseRioParaguay } = require("./lib/paraguayConvencional");
 const { parseFichAlturas } = require("./lib/fichHtmlParser");
 
@@ -71,7 +84,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
 
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Accept, Content-Type");
   if (req.method === "OPTIONS") {
     return res.status(204).end();
@@ -273,6 +286,11 @@ try {
 } catch (e) {
   console.warn("[db paraguay] No se pudo inicializar SQLite:", e.message);
 }
+try {
+  initDbPasos();
+} catch (e) {
+  console.warn("[db pasos] No se pudo inicializar SQLite:", e.message);
+}
 
 // ─── Rutas API ────────────────────────────────────────────────────────────────
 app.get("/api/data", async (req, res) => {
@@ -423,6 +441,166 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
       error: err.message || "Error al obtener datos DMH",
       scrapedAt: new Date().toISOString(),
     });
+  }
+});
+
+// ─── Autenticación por sesión (cookie httpOnly) ───────────────────────────────
+const SESSION_COOKIE = "pasos_session";
+
+/** Parseo mínimo de cookies desde la cabecera (sin dependencias). */
+function parseCookies(req) {
+  const header = req.headers.cookie;
+  const out = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const k = part.slice(0, idx).trim();
+    const v = part.slice(idx + 1).trim();
+    if (k) out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+
+function setSessionCookie(res, token) {
+  const secure = process.env.NODE_ENV === "production";
+  const maxAge = Math.floor(SESSION_TTL_MS / 1000);
+  const parts = [
+    `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAge}`,
+  ];
+  if (secure) parts.push("Secure");
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function clearSessionCookie(res) {
+  res.setHeader(
+    "Set-Cookie",
+    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+  );
+}
+
+/** Middleware: exige sesión válida y deja el usuario en req.user. */
+function requireAuth(req, res, next) {
+  try {
+    const cookies = parseCookies(req);
+    const user = getUserBySession(cookies[SESSION_COOKIE]);
+    if (!user) {
+      return res
+        .status(401)
+        .json({ ok: false, error: "Necesitás iniciar sesión." });
+    }
+    req.user = user;
+    next();
+  } catch (err) {
+    console.error("[auth]", err);
+    res.status(500).json({ ok: false, error: "Error de autenticación." });
+  }
+}
+
+app.post("/api/auth/register", (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const user = createUser(username, password);
+    const { token } = createSession(user.id);
+    setSessionCookie(res, token);
+    res.status(201).json({ ok: true, user: { username: user.username } });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message || "No se pudo registrar." });
+  }
+});
+
+app.post("/api/auth/login", (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const user = authenticate(username, password);
+    if (!user) {
+      return res
+        .status(401)
+        .json({ ok: false, error: "Usuario o contraseña incorrectos." });
+    }
+    const { token } = createSession(user.id);
+    setSessionCookie(res, token);
+    res.json({ ok: true, user: { username: user.username } });
+  } catch (err) {
+    console.error("[login]", err);
+    res.status(500).json({ ok: false, error: "Error al iniciar sesión." });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  try {
+    const cookies = parseCookies(req);
+    deleteSession(cookies[SESSION_COOKIE]);
+  } catch (err) {
+    console.warn("[logout]", err.message);
+  }
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  const cookies = parseCookies(req);
+  const user = getUserBySession(cookies[SESSION_COOKIE]);
+  if (!user) return res.status(401).json({ ok: false });
+  res.json({ ok: true, user: { username: user.username } });
+});
+
+// ─── CRUD: pasos / profundidades / alturas (por usuario autenticado) ──────────
+app.get("/api/pasos", requireAuth, (req, res) => {
+  try {
+    const items = listPasos(req.user.id);
+    res.json({ ok: true, count: items.length, items });
+  } catch (err) {
+    console.error("[GET /api/pasos]", err);
+    res.status(500).json({ ok: false, error: err.message || "Error al listar pasos" });
+  }
+});
+
+app.post("/api/pasos", requireAuth, (req, res) => {
+  try {
+    const item = createPaso(req.user.id, req.body);
+    res.status(201).json({ ok: true, item });
+  } catch (err) {
+    console.error("[POST /api/pasos]", err);
+    res.status(400).json({ ok: false, error: err.message || "No se pudo crear el registro" });
+  }
+});
+
+app.put("/api/pasos/:id", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: "ID inválido." });
+  }
+  try {
+    const item = updatePaso(id, req.user.id, req.body);
+    if (!item) {
+      return res.status(404).json({ ok: false, error: "Registro no encontrado." });
+    }
+    res.json({ ok: true, item });
+  } catch (err) {
+    console.error("[PUT /api/pasos]", err);
+    res.status(400).json({ ok: false, error: err.message || "No se pudo actualizar el registro" });
+  }
+});
+
+app.delete("/api/pasos/:id", requireAuth, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: "ID inválido." });
+  }
+  try {
+    const ok = deletePaso(id, req.user.id);
+    if (!ok) {
+      return res.status(404).json({ ok: false, error: "Registro no encontrado." });
+    }
+    res.json({ ok: true, id });
+  } catch (err) {
+    console.error("[DELETE /api/pasos]", err);
+    res.status(500).json({ ok: false, error: err.message || "No se pudo eliminar el registro" });
   }
 });
 
