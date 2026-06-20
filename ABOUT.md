@@ -8,10 +8,24 @@ El proyecto nace como una herramienta simple para reunir información de la cuen
 
 - Consulta datos de alturas hidrométricas desde FICH/UNL.
 - Consulta estaciones convencionales del Río Paraguay desde DMH Paraguay.
+- Permite cargar manualmente pasos, profundidades y alturas relevadas durante la navegación.
 - Expone una API REST para consumir los datos en JSON.
 - Muestra la información en un dashboard web responsive.
-- Guarda extracciones locales en SQLite.
+- Guarda extracciones locales en SQLite y sirve respuestas desde caché.
 - Permite ejecutar tareas diarias para actualizar datos.
+
+## Pasos y profundidades
+
+Además de las fuentes automáticas, la aplicación incluye una sección de **Pasos y profundidades** para registrar manualmente información relevada durante la navegación (por ejemplo, profundidades y anchos en distintos pasos del río).
+
+Esta sección funciona con cuentas de usuario:
+
+- Registro e inicio de sesión mediante sesión con cookie `HttpOnly`.
+- Cada usuario administra sus propios registros (CRUD: crear, listar, editar y eliminar).
+- Cada registro guarda fecha, puerto, altura, paso, profundidad y ancho.
+- Los datos se persisten localmente en SQLite y se exponen vía la API `/api/pasos`.
+
+A diferencia de las alturas de FICH/UNL y DMH Paraguay, estos datos no provienen de fuentes públicas, sino de la carga manual de cada usuario.
 
 ## Enfoque del proyecto
 
