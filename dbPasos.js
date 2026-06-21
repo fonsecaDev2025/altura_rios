@@ -28,6 +28,10 @@ function initDbPasos() {
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000"); // espera ante escrituras concurrentes
+  db.pragma("wal_autocheckpoint = 1000");
+  db.pragma("cache_size = -16000"); // ~16 MB de caché de páginas
+  db.pragma("mmap_size = 268435456"); // 256 MB de lectura vía mmap
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,6 +174,23 @@ function deleteSession(token) {
   return info.changes > 0;
 }
 
+/** Borra todas las sesiones vencidas. Devuelve cuántas se eliminaron. */
+function cleanupExpiredSessions() {
+  const database = initDbPasos();
+  const info = database
+    .prepare("DELETE FROM sessions WHERE expires_at <= ?")
+    .run(new Date().toISOString());
+  return info.changes;
+}
+
+/** Mantenimiento periódico: limpia sesiones vencidas y trunca el WAL. */
+function maintenancePasos() {
+  if (!db) return null;
+  const removed = cleanupExpiredSessions();
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  return { sessionsRemoved: removed };
+}
+
 // ─── CRUD de pasos (siempre acotado al user_id dueño) ─────────────────────────
 
 function normalizePaso(input) {
@@ -258,6 +279,8 @@ module.exports = {
   createSession,
   getUserBySession,
   deleteSession,
+  cleanupExpiredSessions,
+  maintenancePasos,
   listPasos,
   getPaso,
   createPaso,

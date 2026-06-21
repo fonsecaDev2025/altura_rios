@@ -29,6 +29,10 @@ function initDb() {
   // WAL: permite leer mientras se escribe sin bloqueos (mejor para servir caché).
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
+  db.pragma("busy_timeout = 5000"); // espera ante escrituras concurrentes en vez de fallar
+  db.pragma("wal_autocheckpoint = 1000"); // checkpoint automático cada ~1000 páginas
+  db.pragma("cache_size = -16000"); // ~16 MB de caché de páginas en memoria
+  db.pragma("mmap_size = 268435456"); // 256 MB de lectura vía mmap
   db.exec(`
     CREATE TABLE IF NOT EXISTS extracciones_dia (
       fecha_dia TEXT NOT NULL,
@@ -48,8 +52,20 @@ function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_snapshots_source_time
       ON snapshots (source, scraped_at DESC);
+    -- Limpieza: tabla 'pasos' huérfana de versiones previas (los pasos reales
+    -- viven en pasos.sqlite). Se elimina para no dejar datos muertos acá.
+    DROP TABLE IF EXISTS pasos;
   `);
   return db;
+}
+
+/**
+ * Mantenimiento periódico: trunca el WAL para que no crezca sin control.
+ * Seguro de llamar en caliente; no bloquea lecturas con WAL.
+ */
+function maintenanceAlturas() {
+  if (!db) return null;
+  return db.pragma("wal_checkpoint(TRUNCATE)");
 }
 
 /**
@@ -80,7 +96,7 @@ function saveSnapshot(source, scrapedAtIso, payload) {
            SELECT scraped_at FROM snapshots
            WHERE source = @source
            ORDER BY scraped_at DESC
-           LIMIT 50
+           LIMIT 10
          )`
     )
     .run({ source });
@@ -154,6 +170,12 @@ function saveUltimaExtraccionDelDia(items, scrapedAtIso) {
   return { fechaDia, rowsSaved: n, dbPath };
 }
 
+/** Mantenimiento de la base Paraguay: trunca su WAL. */
+function maintenanceParaguay() {
+  if (!dbParaguay) return null;
+  return dbParaguay.pragma("wal_checkpoint(TRUNCATE)");
+}
+
 /** Base aparte: DMH Paraguay — Río Paraguay (convencionales). */
 const paraguayDbPath =
   process.env.PARAGUAY_SQLITE_PATH || path.join(dbDir, "paraguay_dmh.sqlite");
@@ -171,6 +193,12 @@ function initDbParaguay() {
   if (dbParaguay) return dbParaguay;
   fs.mkdirSync(dbDir, { recursive: true });
   dbParaguay = new Database(paraguayDbPath);
+  dbParaguay.pragma("journal_mode = WAL");
+  dbParaguay.pragma("synchronous = NORMAL");
+  dbParaguay.pragma("busy_timeout = 5000");
+  dbParaguay.pragma("wal_autocheckpoint = 1000");
+  dbParaguay.pragma("cache_size = -16000");
+  dbParaguay.pragma("mmap_size = 268435456");
   dbParaguay.exec(`
     CREATE TABLE IF NOT EXISTS rio_paraguay_dmh (
       fecha TEXT NOT NULL,
@@ -257,6 +285,8 @@ function saveParaguayExtraccion(items, scrapedAtIso) {
 
 module.exports = {
   initDb,
+  maintenanceAlturas,
+  maintenanceParaguay,
   saveUltimaExtraccionDelDia,
   saveSnapshot,
   getLatestSnapshot,

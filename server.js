@@ -20,6 +20,8 @@ const helmet = require("helmet");                        // [1]
 const rateLimit = require("express-rate-limit");         // [2]
 const {
   initDb,
+  maintenanceAlturas,
+  maintenanceParaguay,
   saveUltimaExtraccionDelDia,
   saveSnapshot,
   getLatestSnapshot,
@@ -33,6 +35,7 @@ const {
   createSession,
   getUserBySession,
   deleteSession,
+  maintenancePasos,
   listPasos,
   createPaso,
   updatePaso,
@@ -119,7 +122,7 @@ const scrapeLimiter = rateLimit({
     if (wantsRefresh(req)) return false; // refresco forzado siempre cuenta
     try {
       const source = /paraguay/i.test(req.originalUrl) ? "paraguay" : "parana";
-      const snap = getLatestSnapshot(source);
+      const snap = getCachedSnapshot(source);
       return !!(snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS);
     } catch {
       return false;
@@ -141,9 +144,33 @@ const FETCH_RETRIES = Math.max(1, Number(process.env.FETCH_RETRIES) || 2);
 // TTL: si el último snapshot es más nuevo que esto, se sirve sin scrapear.
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS) || 10 * 60 * 1000;
 
+// Caché en memoria: evita leer SQLite en cada request (clave para alta concurrencia).
+// El snapshot se carga de SQLite una sola vez por arranque y se refresca al scrapear.
+const memSnapshots = new Map(); // source -> { scrapedAt, payload }
+
 function snapshotAgeMs(scrapedAtIso) {
   const t = Date.parse(scrapedAtIso);
   return Number.isNaN(t) ? Infinity : Date.now() - t;
+}
+
+/** Devuelve el snapshot de una fuente desde memoria; si no está, lo carga de SQLite. */
+function getCachedSnapshot(source) {
+  let snap = memSnapshots.get(source);
+  if (!snap) {
+    try {
+      snap = getLatestSnapshot(source);
+    } catch (e) {
+      console.warn(`[cache ${source}] lectura SQLite falló:`, e.message);
+      snap = null;
+    }
+    if (snap) memSnapshots.set(source, snap);
+  }
+  return snap || null;
+}
+
+/** Actualiza la caché en memoria tras un scrapeo exitoso. */
+function setCachedSnapshot(source, scrapedAt, payload) {
+  memSnapshots.set(source, { scrapedAt, payload });
 }
 
 function wantsRefresh(req) {
@@ -292,24 +319,41 @@ try {
   console.warn("[db pasos] No se pudo inicializar SQLite:", e.message);
 }
 
+// ─── Mantenimiento periódico de SQLite ────────────────────────────────────────
+// Trunca los WAL (evita que crezcan sin control) y purga sesiones vencidas.
+const MAINTENANCE_INTERVAL_MS =
+  Number(process.env.MAINTENANCE_INTERVAL_MS) || 30 * 60 * 1000;
+
+function runDbMaintenance() {
+  try {
+    maintenanceAlturas();
+    maintenanceParaguay();
+    const r = maintenancePasos();
+    if (r && r.sessionsRemoved > 0) {
+      console.log(`[mantenimiento] ${r.sessionsRemoved} sesiones vencidas purgadas.`);
+    }
+  } catch (e) {
+    console.warn("[mantenimiento] falló:", e.message);
+  }
+}
+
+const maintenanceTimer = setInterval(runDbMaintenance, MAINTENANCE_INTERVAL_MS);
+maintenanceTimer.unref(); // no impide que el proceso cierre
+
 // ─── Rutas API ────────────────────────────────────────────────────────────────
 app.get("/api/data", async (req, res) => {
   const SOURCE = "parana";
 
   // [1] Servir caché fresca (salvo que se pida ?refresh=1)
   if (!wantsRefresh(req)) {
-    try {
-      const snap = getLatestSnapshot(SOURCE);
-      if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
-        return res.json({
-          ok: true,
-          ...snap.payload,
-          cached: true,
-          cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
-        });
-      }
-    } catch (e) {
-      console.warn("[cache parana] lectura falló:", e.message);
+    const snap = getCachedSnapshot(SOURCE);
+    if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
+      return res.json({
+        ok: true,
+        ...snap.payload,
+        cached: true,
+        cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
+      });
     }
   }
 
@@ -330,13 +374,14 @@ app.get("/api/data", async (req, res) => {
     } catch (snapErr) {
       console.warn("[cache parana] guardado falló:", snapErr.message);
     }
+    setCachedSnapshot(SOURCE, data.scrapedAt, data);
     res.json({ ok: true, ...data, dbSaved, cached: false });
   } catch (err) {
     console.error("[/api/data]", err);
 
     // [3] Fallback: último snapshot disponible aunque esté vencido
     try {
-      const snap = getLatestSnapshot(SOURCE);
+      const snap = getCachedSnapshot(SOURCE);
       if (snap) {
         const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
         const payload = snap.payload || {};
@@ -372,18 +417,14 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
 
   // [1] Servir caché fresca (salvo que se pida ?refresh=1)
   if (!wantsRefresh(req)) {
-    try {
-      const snap = getLatestSnapshot(SOURCE);
-      if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
-        return res.json({
-          ok: true,
-          ...snap.payload,
-          cached: true,
-          cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
-        });
-      }
-    } catch (e) {
-      console.warn("[cache paraguay] lectura falló:", e.message);
+    const snap = getCachedSnapshot(SOURCE);
+    if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
+      return res.json({
+        ok: true,
+        ...snap.payload,
+        cached: true,
+        cacheAgeMs: snapshotAgeMs(snap.scrapedAt),
+      });
     }
   }
 
@@ -407,13 +448,14 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
     } catch (snapErr) {
       console.warn("[cache paraguay] guardado falló:", snapErr.message);
     }
+    setCachedSnapshot(SOURCE, data.scrapedAt, data);
     res.json({ ok: true, ...data, dbSaved, cached: false });
   } catch (err) {
     console.error("[/api/rio-paraguay-dmh]", err);
 
     // [3] Fallback: último snapshot disponible aunque esté vencido
     try {
-      const snap = getLatestSnapshot(SOURCE);
+      const snap = getCachedSnapshot(SOURCE);
       if (snap) {
         const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
         const payload = snap.payload || {};
