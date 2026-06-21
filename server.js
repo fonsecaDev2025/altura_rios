@@ -132,6 +132,39 @@ const scrapeLimiter = rateLimit({
 app.use("/api/data", scrapeLimiter);
 app.use("/api/rio-paraguay-dmh", scrapeLimiter);
 
+// ─── Cache-Control para CDN / navegador ───────────────────────────────────────
+// Clasifica las rutas /api: públicas cacheables vs. privadas (sesión/cookies).
+// Un CDN (Cloudflare, etc.) respeta estas cabeceras y sirve desde el borde.
+function apiCacheControl(req, res, next) {
+  if (!req.path.startsWith("/api/")) return next();
+
+  // Rutas con sesión/cookies: nunca cachear (ni CDN ni navegador).
+  if (req.path.startsWith("/api/auth") || req.path.startsWith("/api/pasos")) {
+    res.setHeader("Cache-Control", "private, no-store");
+    return next();
+  }
+
+  // Endpoints públicos cacheables: solo GET sin refresco forzado.
+  if (req.path === "/api/data" || req.path === "/api/rio-paraguay-dmh") {
+    if (req.method === "GET" && !wantsRefresh(req)) {
+      // s-maxage: caché del CDN; stale-while-revalidate: sirve viejo mientras
+      // revalida; stale-if-error: sirve el último bueno si el origin falla.
+      res.setHeader(
+        "Cache-Control",
+        "public, s-maxage=60, stale-while-revalidate=300, stale-if-error=86400"
+      );
+    } else {
+      res.setHeader("Cache-Control", "no-store");
+    }
+    return next();
+  }
+
+  // Resto de /api (health, etc.): no cachear.
+  res.setHeader("Cache-Control", "no-store");
+  next();
+}
+app.use(apiCacheControl);
+
 // ─── Configuración de puertos ─────────────────────────────────────────────────
 const BASE_PORT = Number(process.env.PORT) || 3000;
 const PORT_TRY_LIMIT = 15;
@@ -404,6 +437,7 @@ app.get("/api/data", async (req, res) => {
       console.warn("[cache parana] fallback falló:", e.message);
     }
 
+    res.setHeader("Cache-Control", "no-store");
     res.status(500).json({
       ok: false,
       error: err.message || "Error interno al obtener datos",
@@ -478,6 +512,7 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
       console.warn("[cache paraguay] fallback falló:", e.message);
     }
 
+    res.setHeader("Cache-Control", "no-store");
     res.status(500).json({
       ok: false,
       error: err.message || "Error al obtener datos DMH",
