@@ -2,8 +2,36 @@ services:
   - type: web
     name: altura-rios
     runtime: node
+    # Los discos persistentes requieren un plan de pago (no "free").
+    plan: starter
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    # Un servicio con disco no escala horizontalmente: 1 instancia (ideal para SQLite).
+    numInstances: 1
     envVars:
       - key: NODE_VERSION
         value: "20"
+      - key: NODE_ENV
+        value: production
+      # Saltos de proxy hasta la app (Cloudflare → Render → app = 2).
+      # Si NO usás Cloudflare al frente (solo Render), poné "1".
+      - key: TRUST_PROXY
+        value: "2"
+      - key: CACHE_TTL_MS
+        value: "600000"
+      # SQLite en el disco persistente (sino se borra en cada deploy).
+      - key: SQLITE_PATH
+        value: /var/data/alturas.sqlite
+      - key: PARAGUAY_SQLITE_PATH
+        value: /var/data/paraguay_dmh.sqlite
+      - key: PASOS_SQLITE_PATH
+        value: /var/data/pasos.sqlite
+      # Dominio(s) permitido(s) para CORS. Se define en el dashboard, no en el repo.
+      - key: CORS_ORIGIN
+        sync: false
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1

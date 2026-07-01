@@ -50,6 +50,15 @@ const PARAGUAY_DMH_URL =
 
 const app = express();
 
+// ─── Trust proxy (detrás de CDN/Render) ───────────────────────────────────────
+// Necesario para que express-rate-limit lea la IP real (X-Forwarded-For) y para
+// que req.secure/protocolo sean correctos. TRUST_PROXY = nº de saltos de proxy
+// (p. ej. "2" para Cloudflare → Render). En local queda desactivado.
+const TRUST_PROXY = process.env.TRUST_PROXY;
+if (TRUST_PROXY) {
+  app.set("trust proxy", /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY);
+}
+
 // ─── [1] Headers de seguridad HTTP ───────────────────────────────────────────
 app.use(
   helmet({
