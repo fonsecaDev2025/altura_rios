@@ -12,7 +12,8 @@
     "test": "node --test 'test/*.test.js'",
     "import:historico": "node scripts/importHistorico.js",
     "sync:paraguay": "node scripts/syncParaguayDmh.js",
-    "recuperar:faltantes": "node scripts/recuperarFaltantes.js"
+    "recuperar:faltantes": "node scripts/recuperarFaltantes.js",
+    "db:studio": "node scripts/dbStudio.js"
   },
   "engines": {
     "node": ">=18"

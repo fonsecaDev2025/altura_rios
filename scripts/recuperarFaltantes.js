@@ -6,11 +6,16 @@
  * Fuentes:
  *   - Puertos argentinos: histórico wfich (http://wfich1.unl.edu.ar/cim/rios/historico/<id>),
  *     con ~360 días. Los IDs salen del último snapshot `parana` en alturas.sqlite.
- *   - Paraguay (DMH): vermas_convencional.php?code=<code> — sólo últimos ~15 días por HTTP.
+ *   - Paraguay (DMH): vermas_convencional.php?code=<code>&page=N (histórico paginado).
+ *
+ * Detecta huecos por puerto/localidad (no solo a nivel global: si una sola
+ * localidad tiene el día, el resto igual se recupera).
  *
  * No sobrescribe datos existentes (usa ON CONFLICT DO NOTHING). Es idempotente.
  *
- *   node scripts/recuperarFaltantes.js
+ *   npm run recuperar:faltantes
+ *   FECHA=2026-07-16 npm run recuperar:faltantes
+ *   node scripts/recuperarFaltantes.js 2026-07-16
  */
 
 const fs = require("fs");
@@ -147,10 +152,26 @@ function extractedAtFor(fechaIso, hora) {
   return `${fechaIso}T${h}-03:00`;
 }
 
+function parseFechaArg(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return null;
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // DD-MM-YYYY o DD/MM/YYYY
+  const m = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(s);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  throw new Error(`Fecha inválida: ${s} (use YYYY-MM-DD o DD-MM-YYYY)`);
+}
+
 async function main() {
   for (const p of [alturasPath, paraguayPath]) {
     if (!fs.existsSync(p)) throw new Error(`No existe la base: ${p}`);
     fs.accessSync(p, fs.constants.W_OK);
+  }
+
+  const fechaForzada = parseFechaArg(process.env.FECHA || process.argv[2] || "");
+  if (fechaForzada) {
+    console.log(`Modo fecha forzada: ${fechaForzada}`);
   }
 
   const dbA = new Database(alturasPath);
@@ -170,13 +191,15 @@ async function main() {
 
   const faltAlturas = calcularFaltantes(alturasFechas);
   const faltParaguay = calcularFaltantes(paraguayFechas);
-  const setFaltParaguay = new Set(faltParaguay.faltantes);
+  // Huecos globales (ninguna fila ese día) + fecha forzada si se pidió.
+  const setFaltParaguayGlobal = new Set(faltParaguay.faltantes);
+  if (fechaForzada) setFaltParaguayGlobal.add(fechaForzada);
 
   console.log(
     `alturas.sqlite   rango ${faltAlturas.min} -> ${faltAlturas.max}  faltan ${faltAlturas.faltantes.length}: ${faltAlturas.faltantes.join(", ") || "—"}`
   );
   console.log(
-    `paraguay_dmh     rango ${faltParaguay.min} -> ${faltParaguay.max}  faltan ${faltParaguay.faltantes.length}: ${faltParaguay.faltantes.join(", ") || "—"}`
+    `paraguay_dmh     rango ${faltParaguay.min} -> ${faltParaguay.max}  faltan (globales) ${faltParaguay.faltantes.length}: ${faltParaguay.faltantes.join(", ") || "—"}`
   );
 
   // ---- Statements de inserción (sin pisar) ----
@@ -213,7 +236,9 @@ async function main() {
   }
   const faltantesDePuerto = (puerto) => {
     const tiene = fechasPorPuerto.get(puerto) || new Set();
-    return new Set(rangoAlturas.filter((d) => !tiene.has(d)));
+    const faltan = rangoAlturas.filter((d) => !tiene.has(d));
+    if (fechaForzada && !tiene.has(fechaForzada)) faltan.push(fechaForzada);
+    return new Set(faltan);
   };
 
   // ===================================================================
@@ -280,6 +305,26 @@ async function main() {
   // ===================================================================
   // 2) Localidades Paraguay -> paraguay_dmh.sqlite (+ alturas.sqlite)
   // ===================================================================
+  // Huecos por localidad (si Humaitá tiene el día pero Pilar no, Pilar se recupera).
+  const rangoParaguay = rangoDeFechas(faltParaguay.min, faltParaguay.max);
+  const fechasPorLocalidad = new Map();
+  for (const row of dbP
+    .prepare(
+      "SELECT localidad, fecha_iso FROM rio_paraguay_dmh WHERE fecha_iso IS NOT NULL"
+    )
+    .all()) {
+    if (!fechasPorLocalidad.has(row.localidad)) {
+      fechasPorLocalidad.set(row.localidad, new Set());
+    }
+    fechasPorLocalidad.get(row.localidad).add(row.fecha_iso);
+  }
+  const faltantesDeLocalidad = (localidad) => {
+    const tiene = fechasPorLocalidad.get(localidad) || new Set();
+    const faltan = rangoParaguay.filter((d) => !tiene.has(d));
+    if (fechaForzada && !tiene.has(fechaForzada)) faltan.push(fechaForzada);
+    return new Set(faltan);
+  };
+
   const localidades = dbP
     .prepare(
       `SELECT localidad, ver_mas_url FROM rio_paraguay_dmh
@@ -289,10 +334,13 @@ async function main() {
   console.log(`\nLocalidades Paraguay: ${localidades.length}`);
 
   const paraguayCubiertos = new Set();
+  let paraguayHuecosPorLoc = 0;
 
   for (const { localidad, ver_mas_url } of localidades) {
-    const objetivoLoc = faltantesDePuerto(localidad);
-    const necesita = new Set([...setFaltParaguay, ...objetivoLoc]);
+    const faltParaguayLoc = faltantesDeLocalidad(localidad);
+    const objetivoLocAlturas = faltantesDePuerto(localidad);
+    paraguayHuecosPorLoc += faltParaguayLoc.size;
+    const necesita = new Set([...faltParaguayLoc, ...objetivoLocAlturas]);
     if (necesita.size === 0) continue;
     const minNeeded = [...necesita].sort()[0];
 
@@ -308,7 +356,8 @@ async function main() {
     let nA = 0;
     const tx = dbP.transaction((list) => {
       for (const r of list) {
-        if (!setFaltParaguay.has(r.fechaIso)) continue;
+        // Insertar si esta localidad no tiene ese día (aunque otra sí lo tenga).
+        if (!faltParaguayLoc.has(r.fechaIso)) continue;
         const info = insParaguay.run({
           fecha: r.fecha,
           fecha_iso: r.fechaIso,
@@ -331,7 +380,7 @@ async function main() {
     // También rellenar la localidad en alturas.sqlite para días faltantes ahí.
     const txA = dbA.transaction((list) => {
       for (const r of list) {
-        if (!objetivoLoc.has(r.fechaIso)) continue;
+        if (!objetivoLocAlturas.has(r.fechaIso)) continue;
         const info = insAltura.run({
           fecha_dia: r.fechaIso,
           puerto: localidad,
@@ -352,8 +401,14 @@ async function main() {
     await sleep(DELAY_MS);
   }
 
+  if (paraguayHuecosPorLoc) {
+    console.log(
+      `(paraguay: ${paraguayHuecosPorLoc} huecos localidad×día a rellenar antes de fetch)`
+    );
+  }
+
   // ---- Resumen final ----
-  const paraguayNoRecuperados = faltParaguay.faltantes.filter(
+  const paraguayNoRecuperados = [...setFaltParaguayGlobal].filter(
     (d) => !paraguayCubiertos.has(d)
   );
 
@@ -368,6 +423,26 @@ async function main() {
   const faltA2 = calcularFaltantes(alturasFechas2);
   const faltP2 = calcularFaltantes(paraguayFechas2);
 
+  // Huecos por localidad que siguen (ej. 16-07 solo en Humaitá).
+  const faltLocRestantes = [];
+  for (const { localidad } of dbP
+    .prepare(
+      `SELECT localidad FROM rio_paraguay_dmh WHERE ver_mas_url <> '' GROUP BY localidad`
+    )
+    .all()) {
+    const tiene = new Set(
+      dbP
+        .prepare(
+          "SELECT fecha_iso FROM rio_paraguay_dmh WHERE localidad=? AND fecha_iso IS NOT NULL"
+        )
+        .all(localidad)
+        .map((r) => r.fecha_iso)
+    );
+    for (const d of rangoDeFechas(faltP2.min, faltP2.max)) {
+      if (!tiene.has(d)) faltLocRestantes.push(`${localidad}:${d}`);
+    }
+  }
+
   dbA.pragma("wal_checkpoint(TRUNCATE)");
   dbP.pragma("wal_checkpoint(TRUNCATE)");
   dbA.close();
@@ -380,11 +455,22 @@ async function main() {
     `alturas.sqlite   días faltantes ahora: ${faltA2.faltantes.length}: ${faltA2.faltantes.join(", ") || "—"}`
   );
   console.log(
-    `paraguay_dmh     días faltantes ahora: ${faltP2.faltantes.length}: ${faltP2.faltantes.join(", ") || "—"}`
+    `paraguay_dmh     días faltantes ahora (globales): ${faltP2.faltantes.length}: ${faltP2.faltantes.join(", ") || "—"}`
   );
+  if (faltLocRestantes.length) {
+    console.log(
+      `paraguay_dmh     huecos localidad×día restantes: ${faltLocRestantes.length}`
+    );
+    console.log(
+      `  (muestra) ${faltLocRestantes.slice(0, 12).join(", ")}${faltLocRestantes.length > 12 ? "…" : ""}`
+    );
+  } else {
+    console.log("paraguay_dmh     huecos localidad×día restantes: 0");
+  }
+
   if (paraguayNoRecuperados.length) {
     console.log(
-      `\nParaguay: días que la DMH no tiene en su histórico (no recuperables): ${paraguayNoRecuperados.join(", ")}`
+      `\nParaguay: días globales que la DMH no entregó en esta corrida: ${paraguayNoRecuperados.join(", ")}`
     );
   }
 }
