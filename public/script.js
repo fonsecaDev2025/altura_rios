@@ -1,13 +1,9 @@
 /**
- * Dashboard: GET /api/data → tabla de alturas de ríos (FICH/UNL).
- * items: puerto, rio, altura, variacion, estado, alturaAnterior, alerta, evacuacion
+ * Dashboard Paraná: GET /api/data + /api/series
  */
 
 function apiDataUrl(forceRefresh = false) {
-  const base =
-    typeof resolveApiUrl !== "undefined"
-      ? resolveApiUrl("/api/data")
-      : "/api/data";
+  const base = UI.apiUrl("/api/data");
   if (!forceRefresh) return base;
   return base + (base.includes("?") ? "&" : "?") + "refresh=1";
 }
@@ -24,16 +20,26 @@ const el = {
   warningsList: document.getElementById("warnings-list"),
   toolbar: document.getElementById("toolbar"),
   filterInput: document.getElementById("filter-input"),
+  rioFilters: document.getElementById("rio-filters"),
+  legend: document.getElementById("legend"),
   tableSection: document.getElementById("table-section"),
 };
 
 let lastItems = [];
+let seriesByPuerto = {};
+let activeRio = "";
+const coldStart = UI.createColdStartWatcher(el.statusText, 8000);
+const FETCH_MS = 60000;
 
 function setLoading(loading) {
   el.btnRefresh.disabled = loading;
   el.statusPanel.classList.toggle("status--loading", loading);
   if (loading) {
     el.statusText.textContent = "Obteniendo datos…";
+    el.tableSection.innerHTML = UI.skeletonRows(8, 9);
+    coldStart.start();
+  } else {
+    coldStart.clear();
   }
 }
 
@@ -65,21 +71,9 @@ function renderWarnings(warnings) {
     return;
   }
   el.warningsBlock.hidden = false;
-  el.warningsList.innerHTML = warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("");
-}
-
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str == null ? "" : String(str);
-  return div.innerHTML;
-}
-
-function estadoClass(estado) {
-  const e = (estado || "").toUpperCase();
-  if (e.includes("BAJA")) return "estado estado--baja";
-  if (e.includes("CRECE")) return "estado estado--crece";
-  if (e.includes("ESTAC")) return "estado estado--estac";
-  return "estado estado--neutral";
+  el.warningsList.innerHTML = warnings
+    .map((w) => `<li>${UI.escapeHtml(w)}</li>`)
+    .join("");
 }
 
 function renderMeta(payload) {
@@ -90,9 +84,36 @@ function renderMeta(payload) {
   el.metaCount.textContent = String(payload.count ?? payload.items?.length ?? 0);
 }
 
+function uniqueRios(items) {
+  const set = new Set();
+  for (const row of items) {
+    const r = (row.rio || "").trim();
+    if (r) set.add(r);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, "es"));
+}
+
+function renderRioChips() {
+  const rios = uniqueRios(lastItems);
+  if (!rios.length) {
+    el.rioFilters.innerHTML = "";
+    return;
+  }
+  const allActive = !activeRio;
+  el.rioFilters.innerHTML =
+    `<button type="button" class="chip-filter${allActive ? " chip-filter--active" : ""}" data-rio="">Todos</button>` +
+    rios
+      .map((rio) => {
+        const active = activeRio === rio ? " chip-filter--active" : "";
+        return `<button type="button" class="chip-filter${active}" data-rio="${UI.escapeHtml(rio)}">${UI.escapeHtml(rio)}</button>`;
+      })
+      .join("");
+}
+
 function rowMatchesFilter(row, q) {
+  if (activeRio && (row.rio || "").trim() !== activeRio) return false;
   if (!q) return true;
-  const hay = [row.puerto, row.rio, row.estado, row.altura]
+  const hay = [row.puerto, row.rio, row.estado, row.altura, row.alerta, row.evacuacion]
     .join(" ")
     .toLowerCase();
   return hay.includes(q);
@@ -106,22 +127,28 @@ function renderTable() {
     el.tableSection.innerHTML =
       '<p class="empty">No hay registros. Revisa la API.</p>';
     el.toolbar.hidden = true;
+    el.legend.hidden = true;
     return;
   }
 
   el.toolbar.hidden = false;
+  el.legend.hidden = false;
+  renderRioChips();
 
   const head = `
     <table class="data-table">
+      <caption class="sr-only">Alturas hidrométricas de la cuenca del Paraná</caption>
       <thead>
         <tr>
-          <th>Puerto</th>
-          <th>Río</th>
-          <th>Altura</th>
-          <th>Variación</th>
-          <th>Estado</th>
-          <th>Alt. anterior</th>
-          <th>Hist.</th>
+          <th scope="col">Puerto</th>
+          <th scope="col">Río</th>
+          <th scope="col">Altura</th>
+          <th scope="col">Variación</th>
+          <th scope="col">Tendencia</th>
+          <th scope="col">Umbral</th>
+          <th scope="col">Evolución</th>
+          <th scope="col">Alt. anterior</th>
+          <th scope="col">Histórico</th>
         </tr>
       </thead>
       <tbody>
@@ -129,46 +156,63 @@ function renderTable() {
 
   const rows = items
     .map((row) => {
+      const level = UI.nivelUmbral(row.altura, row.alerta, row.evacuacion);
+      const umbralTitle = [
+        row.alerta ? `Alerta: ${row.alerta}` : null,
+        row.evacuacion ? `Evacuación: ${row.evacuacion}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      const spark = UI.sparklineSvg(seriesByPuerto[row.puerto] || []);
       const hist = row.historicoHref
-        ? `<a href="${escapeHtml(row.historicoHref)}" target="_blank" rel="noopener" class="link-hist">Ver</a>`
+        ? `<a href="${UI.escapeHtml(row.historicoHref)}" target="_blank" rel="noopener" class="link-hist">Ver histórico de ${UI.escapeHtml(row.puerto)}</a>`
         : "—";
       return `
         <tr>
-          <td data-label="Puerto">${escapeHtml(row.puerto)}</td>
-          <td data-label="Río">${escapeHtml(row.rio)}</td>
-          <td data-label="Altura" class="num">${escapeHtml(row.altura)}</td>
-          <td data-label="Variación" class="num">${escapeHtml(row.variacion)}</td>
-          <td data-label="Estado"><span class="${estadoClass(row.estado)}">${escapeHtml(row.estado)}</span></td>
-          <td data-label="Alt. ant." class="num">${escapeHtml(row.alturaAnterior)}</td>
-          <td data-label="Hist.">${hist}</td>
+          <td data-label="Puerto" class="col-puerto">${UI.escapeHtml(row.puerto)}</td>
+          <td data-label="Río">${UI.escapeHtml(row.rio)}</td>
+          <td data-label="Altura" class="num">${UI.escapeHtml(row.altura)}</td>
+          <td data-label="Variación" class="num">${UI.escapeHtml(row.variacion)}</td>
+          <td data-label="Tendencia"><span class="${UI.estadoClass(row.estado)}">${UI.escapeHtml(row.estado)}</span></td>
+          <td data-label="Umbral"><span class="umbral umbral--${level}" title="${UI.escapeHtml(umbralTitle || "Sin umbrales")}">${UI.umbralLabel(level)}</span></td>
+          <td data-label="Evolución">${spark}</td>
+          <td data-label="Alt. ant." class="num">${UI.escapeHtml(row.alturaAnterior)}</td>
+          <td data-label="Histórico">${hist}</td>
         </tr>`;
     })
     .join("");
 
-  const foot = `</tbody></table>`;
   const emptyFilter =
-    items.length === 0 && q
-      ? `<p class="empty empty--inline">Ningún resultado para «${escapeHtml(q)}».</p>`
+    items.length === 0 && (q || activeRio)
+      ? `<p class="empty empty--inline">Ningún resultado para el filtro actual.</p>`
       : "";
 
-  el.tableSection.innerHTML = `<div class="table-scroll">${head}${rows}${foot}</div>${emptyFilter}`;
+  el.tableSection.innerHTML = `<div class="table-scroll">${head}${rows}</tbody></table></div>${emptyFilter}`;
 }
 
-const FETCH_MS = 60000;
+async function loadSeries() {
+  try {
+    const res = await UI.fetchWithTimeout(
+      UI.apiUrl("/api/series?source=parana&dias=14"),
+      {},
+      20000
+    );
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok && data.series) {
+      seriesByPuerto = data.series;
+      if (lastItems.length) renderTable();
+    }
+  } catch (e) {
+    console.warn("[series]", e);
+  }
+}
 
 async function fetchData(forceRefresh = false) {
   setLoading(true);
   clearErrorState();
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_MS);
-
   try {
-    const res = await fetch(apiDataUrl(forceRefresh), {
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-
+    const res = await UI.fetchWithTimeout(apiDataUrl(forceRefresh), {}, FETCH_MS);
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok || data.ok === false) {
@@ -180,6 +224,7 @@ async function fetchData(forceRefresh = false) {
       setError(msg);
       el.metaSection.hidden = true;
       el.toolbar.hidden = true;
+      el.legend.hidden = true;
       lastItems = [];
       el.tableSection.innerHTML = "";
       renderWarnings([]);
@@ -198,25 +243,32 @@ async function fetchData(forceRefresh = false) {
     renderMeta(data);
     renderWarnings(data.warnings);
     renderTable();
+    loadSeries();
   } catch (err) {
     console.error(err);
     if (err.name === "AbortError") {
-      setError("Tiempo de espera agotado. Vuelve a intentar.");
+      setError("Tiempo de espera agotado. El servidor puede estar despertando; volvé a intentar.");
     } else {
-      setError("No se pudo conectar al servidor.");
+      setError("No se pudo conectar al servidor. Si está en Render, puede tardar ~30–60 s al despertar.");
     }
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;
+    el.legend.hidden = true;
     lastItems = [];
     el.tableSection.innerHTML = "";
   } finally {
-    clearTimeout(timeoutId);
     setLoading(false);
   }
 }
 
 el.btnRefresh.addEventListener("click", () => fetchData(true));
 el.filterInput.addEventListener("input", () => renderTable());
+el.rioFilters.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-rio]");
+  if (!btn) return;
+  activeRio = btn.getAttribute("data-rio") || "";
+  renderTable();
+});
 
 document.addEventListener("DOMContentLoaded", () => {
   fetchData(false);

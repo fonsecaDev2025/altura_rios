@@ -56,14 +56,13 @@ let items = [];
 let authMode = "login"; // "login" | "register"
 
 function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s == null ? "" : String(s);
-  return d.innerHTML;
+  return typeof UI !== "undefined" ? UI.escapeHtml(s) : String(s ?? "");
 }
 
 function setStatus(msg, isError = false) {
   el.statusText.textContent = msg;
   el.statusPanel.classList.toggle("status--error", !!isError);
+  el.statusPanel.classList.toggle("status--loading", !isError && /cargando/i.test(msg || ""));
 }
 
 // ─── Vistas: autenticado vs invitado ──────────────────────────────────────────
@@ -97,6 +96,8 @@ function setAuthMode(mode) {
   const login = mode === "login";
   el.tabLogin.classList.toggle("auth-tab--current", login);
   el.tabRegister.classList.toggle("auth-tab--current", !login);
+  el.tabLogin.setAttribute("aria-selected", login ? "true" : "false");
+  el.tabRegister.setAttribute("aria-selected", login ? "false" : "true");
   el.authSubmit.textContent = login ? "Entrar" : "Crear cuenta";
   el.authPassword.autocomplete = login ? "current-password" : "new-password";
   setAuthError("");
@@ -193,15 +194,16 @@ function renderTable() {
 
   const head = `
     <table class="data-table">
+      <caption class="sr-only">Tus registros de pasos y profundidades</caption>
       <thead>
         <tr>
-          <th>Fecha</th>
-          <th>Puerto</th>
-          <th>Altura</th>
-          <th>Paso</th>
-          <th>Profundidad</th>
-          <th>Ancho</th>
-          <th>Acciones</th>
+          <th scope="col">Fecha</th>
+          <th scope="col">Puerto</th>
+          <th scope="col">Altura</th>
+          <th scope="col">Paso</th>
+          <th scope="col">Profundidad</th>
+          <th scope="col">Ancho</th>
+          <th scope="col">Acciones</th>
         </tr>
       </thead>
       <tbody>`;
@@ -210,15 +212,15 @@ function renderTable() {
     .map(
       (row) => `
         <tr>
-          <td class="num">${escapeHtml(row.fecha)}</td>
-          <td class="col-localidad">${escapeHtml(row.puerto)}</td>
-          <td class="num">${escapeHtml(row.altura)}</td>
-          <td>${escapeHtml(row.paso)}</td>
-          <td class="num">${escapeHtml(row.profundidad)}</td>
-          <td class="num">${escapeHtml(row.ancho)}</td>
-          <td class="row-actions">
-            <button type="button" class="btn-mini" data-action="edit" data-id="${row.id}">Editar</button>
-            <button type="button" class="btn-mini btn-mini--danger" data-action="delete" data-id="${row.id}">Eliminar</button>
+          <td data-label="Fecha" class="num">${escapeHtml(row.fecha)}</td>
+          <td data-label="Puerto" class="col-localidad">${escapeHtml(row.puerto)}</td>
+          <td data-label="Altura" class="num">${escapeHtml(row.altura)}</td>
+          <td data-label="Paso">${escapeHtml(row.paso)}</td>
+          <td data-label="Profundidad" class="num">${escapeHtml(row.profundidad)}</td>
+          <td data-label="Ancho" class="num">${escapeHtml(row.ancho)}</td>
+          <td data-label="Acciones" class="row-actions">
+            <button type="button" class="btn-mini" data-action="edit" data-id="${row.id}" aria-label="Editar ${escapeHtml(row.puerto)}">Editar</button>
+            <button type="button" class="btn-mini btn-mini--danger" data-action="delete" data-id="${row.id}" aria-label="Eliminar ${escapeHtml(row.puerto)}">Eliminar</button>
           </td>
         </tr>`
     )
@@ -235,12 +237,15 @@ function handleUnauthorized() {
 
 async function loadItems() {
   setStatus("Cargando registros…");
+  el.tableRoot.innerHTML =
+    typeof UI !== "undefined" ? UI.skeletonRows(5, 7) : "";
   try {
     const res = await api("/api/pasos");
     if (res.status === 401) return handleUnauthorized();
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.ok === false) {
       setStatus(data.error || `Error HTTP ${res.status}`, true);
+      el.tableRoot.innerHTML = "";
       return;
     }
     items = Array.isArray(data.items) ? data.items : [];
@@ -252,7 +257,11 @@ async function loadItems() {
     renderTable();
   } catch (e) {
     console.error(e);
-    setStatus("No se pudo conectar al servidor local.", true);
+    setStatus(
+      "No se pudo conectar al servidor. Si está en Render, puede tardar ~30–60 s al despertar.",
+      true
+    );
+    el.tableRoot.innerHTML = "";
   }
 }
 

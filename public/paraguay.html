@@ -37,27 +37,41 @@
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Secciones">
-      <a href="/" class="tabs__item">Rio Paraná</a>
-      <a href="/paraguay.html" class="tabs__item tabs__item--current" aria-current="page">Rio Paraguay</a>
-      <a href="/pasos.html" class="tabs__item">Pasos y profundidades</a>
-    </nav>
+    <div class="site-nav">
+      <button
+        type="button"
+        class="nav-toggle"
+        id="nav-toggle"
+        aria-expanded="false"
+        aria-controls="site-menu"
+      >
+        <span class="nav-toggle__bars" aria-hidden="true"></span>
+        <span class="sr-only">Abrir menú de secciones</span>
+      </button>
+      <nav class="tabs" id="site-menu" aria-label="Secciones por río">
+        <a href="/" class="tabs__item">Río Paraná</a>
+        <a href="/paraguay.html" class="tabs__item tabs__item--current" aria-current="page"
+          >Río Paraguay</a
+        >
+        <a href="/pasos.html" class="tabs__item">Pasos y profundidades</a>
+      </nav>
+    </div>
 
     <main class="main">
       <section class="status" id="status-panel" aria-live="polite">
         <p class="status__text" id="status-text">Cargando…</p>
       </section>
 
-      <section class="meta" id="meta-section" hidden>
-        <div class="meta__chip">
+      <section class="meta meta--grid" id="meta-section" hidden>
+        <div class="meta__chip meta__chip--block">
           <span class="meta__label">Extracción</span>
           <span class="meta__value" id="meta-time"></span>
         </div>
-        <div class="meta__chip">
+        <div class="meta__chip meta__chip--block">
           <span class="meta__label">Estaciones</span>
           <span class="meta__value" id="meta-count"></span>
         </div>
-        <div class="meta__chip" id="meta-db-chip" hidden>
+        <div class="meta__chip meta__chip--block" id="meta-db-chip" hidden>
           <span class="meta__label">SQLite</span>
           <span class="meta__value" id="meta-db"></span>
         </div>
@@ -66,6 +80,17 @@
       <section class="warnings" id="warnings-block" hidden>
         <h2 class="warnings__title">Avisos</h2>
         <ul class="warnings__list" id="warnings-list"></ul>
+      </section>
+
+      <section class="toolbar" id="toolbar" hidden>
+        <label class="sr-only" for="filter-input">Filtrar localidades</label>
+        <input
+          type="search"
+          id="filter-input"
+          class="filter-input"
+          placeholder="Buscar por localidad…"
+          autocomplete="off"
+        />
       </section>
 
       <div class="table-wrap" id="table-root"></div>
@@ -78,12 +103,15 @@
           href="https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php"
           target="_blank"
           rel="noopener noreferrer"
-          >meteorologia.gov.py</a>
-        </span>
+          >meteorologia.gov.py</a
+        >
+      </span>
     </footer>
 
     <script src="config.js"></script>
     <script src="api-resolve.js"></script>
+    <script src="ui.js"></script>
+    <script src="nav.js"></script>
     <script src="paraguay.js"></script>
   </body>
 </html>

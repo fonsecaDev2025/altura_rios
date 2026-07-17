@@ -37,11 +37,23 @@
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Secciones">
-      <a href="/" class="tabs__item tabs__item--current" aria-current="page">Rio Paraná</a>
-      <a href="/paraguay.html" class="tabs__item">Rio Paraguay </a>
-      <a href="/pasos.html" class="tabs__item">Pasos y profundidades</a>
-    </nav>
+    <div class="site-nav">
+      <button
+        type="button"
+        class="nav-toggle"
+        id="nav-toggle"
+        aria-expanded="false"
+        aria-controls="site-menu"
+      >
+        <span class="nav-toggle__bars" aria-hidden="true"></span>
+        <span class="sr-only">Abrir menú de secciones</span>
+      </button>
+      <nav class="tabs" id="site-menu" aria-label="Secciones por río">
+        <a href="/" class="tabs__item tabs__item--current" aria-current="page">Río Paraná</a>
+        <a href="/paraguay.html" class="tabs__item">Río Paraguay</a>
+        <a href="/pasos.html" class="tabs__item">Pasos y profundidades</a>
+      </nav>
+    </div>
 
     <main class="main">
       <section class="status" id="status-panel" aria-live="polite">
@@ -68,6 +80,13 @@
         <ul class="warnings__list" id="warnings-list"></ul>
       </section>
 
+      <p class="legend" id="legend" hidden>
+        <span class="legend__item"><span class="umbral umbral--normal">Normal</span></span>
+        <span class="legend__item"><span class="umbral umbral--alerta">Alerta</span></span>
+        <span class="legend__item"><span class="umbral umbral--evacuacion">Evacuación</span></span>
+        <span class="legend__item"><span class="estado estado--baja">Baja</span> / <span class="estado estado--crece">Crece</span></span>
+      </p>
+
       <section class="toolbar" id="toolbar" hidden>
         <label class="sr-only" for="filter-input">Filtrar tabla</label>
         <input
@@ -77,6 +96,7 @@
           placeholder="Buscar por puerto, río o estado…"
           autocomplete="off"
         />
+        <div class="chip-row" id="rio-filters" role="group" aria-label="Filtrar por río"></div>
       </section>
 
       <section class="table-wrap" id="table-section"></section>
@@ -97,6 +117,8 @@
 
     <script src="config.js"></script>
     <script src="api-resolve.js"></script>
+    <script src="ui.js"></script>
+    <script src="nav.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

@@ -27,6 +27,8 @@ const {
   getLatestSnapshot,
   initDbParaguay,
   saveParaguayExtraccion,
+  getSeriesAlturas,
+  getSeriesParaguay,
 } = require("./db");
 const {
   initDbPasos,
@@ -692,6 +694,24 @@ app.delete("/api/pasos/:id", requireAuth, (req, res) => {
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "altura-rios-dashboard" });
+});
+
+/** Series temporales (sparklines): ?source=parana|paraguay&dias=14 */
+app.get("/api/series", (req, res) => {
+  try {
+    const source = String(req.query.source || "parana").toLowerCase();
+    const dias = Math.max(1, Math.min(90, Number(req.query.dias) || 14));
+    const series =
+      source === "paraguay" ? getSeriesParaguay(dias) : getSeriesAlturas(dias);
+    res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
+    res.json({ ok: true, source, dias, series });
+  } catch (err) {
+    console.error("[/api/series]", err);
+    res.status(500).json({
+      ok: false,
+      error: err.message || "No se pudieron leer las series",
+    });
+  }
 });
 
 // ─── HTTP Server ──────────────────────────────────────────────────────────────

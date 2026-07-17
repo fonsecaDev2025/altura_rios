@@ -283,6 +283,57 @@ function saveParaguayExtraccion(items, scrapedAtIso) {
   return { rowsSaved: n, dbPath: paraguayDbPath };
 }
 
+/**
+ * Series temporales para sparklines (últimos `dias` por puerto).
+ * @returns {Record<string, Array<{fecha: string, altura: string}>>}
+ */
+function getSeriesAlturas(dias = 14) {
+  const database = initDb();
+  const n = Math.max(1, Math.min(90, Number(dias) || 14));
+  const rows = database
+    .prepare(
+      `SELECT puerto, fecha_dia AS fecha, ultimo_registro AS altura
+       FROM extracciones_dia
+       WHERE fecha_dia >= date('now', ?)
+       ORDER BY puerto ASC, fecha_dia ASC`
+    )
+    .all(`-${n} days`);
+  const out = {};
+  for (const r of rows) {
+    const key = (r.puerto || "").trim();
+    if (!key) continue;
+    if (!out[key]) out[key] = [];
+    out[key].push({ fecha: r.fecha, altura: r.altura || "" });
+  }
+  return out;
+}
+
+/**
+ * Series temporales Paraguay (últimos `dias` por localidad).
+ * @returns {Record<string, Array<{fecha: string, altura: string}>>}
+ */
+function getSeriesParaguay(dias = 14) {
+  const database = initDbParaguay();
+  const n = Math.max(1, Math.min(90, Number(dias) || 14));
+  const rows = database
+    .prepare(
+      `SELECT localidad AS puerto, fecha_iso AS fecha, nivel_del_dia AS altura
+       FROM rio_paraguay_dmh
+       WHERE fecha_iso IS NOT NULL
+         AND fecha_iso >= date('now', ?)
+       ORDER BY localidad ASC, fecha_iso ASC`
+    )
+    .all(`-${n} days`);
+  const out = {};
+  for (const r of rows) {
+    const key = (r.puerto || "").trim();
+    if (!key) continue;
+    if (!out[key]) out[key] = [];
+    out[key].push({ fecha: r.fecha, altura: r.altura || "" });
+  }
+  return out;
+}
+
 module.exports = {
   initDb,
   maintenanceAlturas,
@@ -294,4 +345,6 @@ module.exports = {
   initDbParaguay,
   saveParaguayExtraccion,
   paraguayDbPath,
+  getSeriesAlturas,
+  getSeriesParaguay,
 };

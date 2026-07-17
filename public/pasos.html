@@ -36,13 +36,25 @@
       </div>
     </header>
 
-    <nav class="tabs" aria-label="Secciones">
-      <a href="/" class="tabs__item">Rio Paraná</a>
-      <a href="/paraguay.html" class="tabs__item">Rio Paraguay</a>
-      <a href="/pasos.html" class="tabs__item tabs__item--current" aria-current="page"
-        >Pasos y profundidades</a
+    <div class="site-nav">
+      <button
+        type="button"
+        class="nav-toggle"
+        id="nav-toggle"
+        aria-expanded="false"
+        aria-controls="site-menu"
       >
-    </nav>
+        <span class="nav-toggle__bars" aria-hidden="true"></span>
+        <span class="sr-only">Abrir menú de secciones</span>
+      </button>
+      <nav class="tabs" id="site-menu" aria-label="Secciones por río">
+        <a href="/" class="tabs__item">Río Paraná</a>
+        <a href="/paraguay.html" class="tabs__item">Río Paraguay</a>
+        <a href="/pasos.html" class="tabs__item tabs__item--current" aria-current="page"
+          >Pasos y profundidades</a
+        >
+      </nav>
+    </div>
 
     <main class="main">
       <section class="status" id="status-panel" aria-live="polite">
@@ -50,11 +62,25 @@
       </section>
 
       <section class="auth-card" id="auth-card" hidden>
-        <div class="auth-tabs">
-          <button type="button" class="auth-tab auth-tab--current" id="tab-login">
+        <div class="auth-tabs" role="tablist" aria-label="Acceso">
+          <button
+            type="button"
+            class="auth-tab auth-tab--current"
+            id="tab-login"
+            role="tab"
+            aria-selected="true"
+          >
             Iniciar sesión
           </button>
-          <button type="button" class="auth-tab" id="tab-register">Crear cuenta</button>
+          <button
+            type="button"
+            class="auth-tab"
+            id="tab-register"
+            role="tab"
+            aria-selected="false"
+          >
+            Crear cuenta
+          </button>
         </div>
         <form id="auth-form" novalidate>
           <div class="field">
@@ -164,6 +190,8 @@
 
     <script src="config.js"></script>
     <script src="api-resolve.js"></script>
+    <script src="ui.js"></script>
+    <script src="nav.js"></script>
     <script src="pasos.js"></script>
   </body>
 </html>
