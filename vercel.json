@@ -4,8 +4,13 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
-      "memory": 1024,
       "includeFiles": "public/**"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/sync",
+      "schedule": "0 11 * * *"
+    }
+  ]
 }

@@ -150,8 +150,12 @@ app.use("/api/rio-paraguay-dmh", scrapeLimiter);
 function apiCacheControl(req, res, next) {
   if (!req.path.startsWith("/api/")) return next();
 
-  // Rutas con sesión/cookies: nunca cachear (ni CDN ni navegador).
-  if (req.path.startsWith("/api/auth") || req.path.startsWith("/api/pasos")) {
+  // Rutas con sesión/cookies o cron: nunca cachear.
+  if (
+    req.path.startsWith("/api/auth") ||
+    req.path.startsWith("/api/pasos") ||
+    req.path.startsWith("/api/cron")
+  ) {
     res.setHeader("Cache-Control", "private, no-store");
     return next();
   }
@@ -334,6 +338,68 @@ async function fetchAlturas() {
   throw lastError || new Error("No se pudo obtener datos de PNA.");
 }
 
+/** Scrapea Paraná, guarda extracciones + snapshot (Turso o SQLite). */
+async function syncParanaToDb() {
+  const SOURCE = "parana";
+  const data = await fetchAlturas();
+  let dbSaved = null;
+  if (data.items && data.items.length > 0) {
+    dbSaved = await saveUltimaExtraccionDelDia(data.items, data.scrapedAt);
+  }
+  try {
+    await saveSnapshot(SOURCE, data.scrapedAt, data);
+  } catch (snapErr) {
+    console.warn("[cache parana] guardado falló:", snapErr.message);
+  }
+  setCachedSnapshot(SOURCE, data.scrapedAt, data);
+  return {
+    ok: true,
+    count: (data.items && data.items.length) || 0,
+    scrapedAt: data.scrapedAt,
+    dbSaved,
+    warnings: data.warnings || [],
+  };
+}
+
+/** Scrapea Paraguay DMH y guarda en DB. */
+async function syncParaguayToDb() {
+  const SOURCE = "paraguay";
+  const data = await fetchRioParaguayDmh();
+  let dbSaved = null;
+  if (data.items && data.items.length > 0) {
+    dbSaved = await saveParaguayExtraccion(data.items, data.scrapedAt);
+  }
+  try {
+    await saveSnapshot(SOURCE, data.scrapedAt, data);
+  } catch (snapErr) {
+    console.warn("[cache paraguay] guardado falló:", snapErr.message);
+  }
+  setCachedSnapshot(SOURCE, data.scrapedAt, data);
+  return {
+    ok: true,
+    count: (data.items && data.items.length) || 0,
+    scrapedAt: data.scrapedAt,
+    dbSaved,
+    warnings: data.warnings || [],
+  };
+}
+
+function assertCronAuth(req, res) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    res.status(503).json({ ok: false, error: "CRON_SECRET no configurado" });
+    return false;
+  }
+  const auth = req.headers.authorization || "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  const token = bearer || String(req.query.secret || "");
+  if (!token || token !== secret) {
+    res.status(401).json({ ok: false, error: "No autorizado" });
+    return false;
+  }
+  return true;
+}
+
 // ─── [8] Archivos estáticos con headers extra ────────────────────────────────
 app.use(
   express.static(path.join(__dirname, "public"), {
@@ -393,6 +459,30 @@ if (!IS_VERCEL) {
 }
 
 // ─── Rutas API ────────────────────────────────────────────────────────────────
+
+/** Cron Vercel: scrapea fuentes oficiales y persiste en Turso/SQLite. */
+app.get("/api/cron/sync", async (req, res) => {
+  if (!assertCronAuth(req, res)) return;
+  const startedAt = new Date().toISOString();
+  const result = { ok: true, startedAt, backend: process.env.TURSO_DATABASE_URL ? "turso" : "sqlite-file" };
+  try {
+    result.parana = await syncParanaToDb();
+  } catch (err) {
+    console.error("[/api/cron/sync parana]", err);
+    result.parana = { ok: false, error: err.message || String(err) };
+    result.ok = false;
+  }
+  try {
+    result.paraguay = await syncParaguayToDb();
+  } catch (err) {
+    console.error("[/api/cron/sync paraguay]", err);
+    result.paraguay = { ok: false, error: err.message || String(err) };
+    result.ok = false;
+  }
+  result.finishedAt = new Date().toISOString();
+  res.status(result.ok ? 200 : 502).json(result);
+});
+
 app.get("/api/data", async (req, res) => {
   const SOURCE = "parana";
 
@@ -411,23 +501,15 @@ app.get("/api/data", async (req, res) => {
 
   // [2] Scrapeo en vivo
   try {
-    const data = await fetchAlturas();
-    let dbSaved = null;
-    if (data.items && data.items.length > 0) {
-      try {
-        dbSaved = await saveUltimaExtraccionDelDia(data.items, data.scrapedAt);
-      } catch (dbErr) {
-        console.error("[db]", dbErr);
-        data.warnings.push(`DB: ${dbErr.message}`);
-      }
-    }
-    try {
-      await saveSnapshot(SOURCE, data.scrapedAt, data);
-    } catch (snapErr) {
-      console.warn("[cache parana] guardado falló:", snapErr.message);
-    }
-    setCachedSnapshot(SOURCE, data.scrapedAt, data);
-    res.json({ ok: true, ...data, dbSaved, cached: false });
+    const sync = await syncParanaToDb();
+    const snap = memSnapshots.get(SOURCE);
+    const data = (snap && snap.payload) || {};
+    res.json({
+      ok: true,
+      ...data,
+      dbSaved: sync.dbSaved,
+      cached: false,
+    });
   } catch (err) {
     console.error("[/api/data]", err);
 
@@ -483,26 +565,18 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
 
   // [2] Scrapeo en vivo
   try {
-    const data = await fetchRioParaguayDmh();
-    let dbSaved = null;
-    if (data.items && data.items.length > 0) {
-      try {
-        dbSaved = await saveParaguayExtraccion(data.items, data.scrapedAt);
-        if (dbSaved && dbSaved.rowsSaved > 0) {
-          console.log(`[db paraguay] ${dbSaved.rowsSaved} filas en ${dbSaved.dbPath}`);
-        }
-      } catch (dbErr) {
-        console.error("[db paraguay]", dbErr);
-        data.warnings.push(`DB Paraguay: ${dbErr.message}`);
-      }
+    const sync = await syncParaguayToDb();
+    if (sync.dbSaved && sync.dbSaved.rowsSaved > 0) {
+      console.log(`[db paraguay] ${sync.dbSaved.rowsSaved} filas en ${sync.dbSaved.dbPath}`);
     }
-    try {
-      await saveSnapshot(SOURCE, data.scrapedAt, data);
-    } catch (snapErr) {
-      console.warn("[cache paraguay] guardado falló:", snapErr.message);
-    }
-    setCachedSnapshot(SOURCE, data.scrapedAt, data);
-    res.json({ ok: true, ...data, dbSaved, cached: false });
+    const snap = memSnapshots.get(SOURCE);
+    const data = (snap && snap.payload) || {};
+    res.json({
+      ok: true,
+      ...data,
+      dbSaved: sync.dbSaved,
+      cached: false,
+    });
   } catch (err) {
     console.error("[/api/rio-paraguay-dmh]", err);
 

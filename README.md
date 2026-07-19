@@ -113,6 +113,7 @@ Copiá `.env.example` a `.env` si usás Turso en local. Sin `TURSO_DATABASE_URL`
 | --- | --- | --- |
 | `TURSO_DATABASE_URL` | URL libsql de Turso (requerida en Vercel) | — |
 | `TURSO_AUTH_TOKEN` | Token de Turso | — |
+| `CRON_SECRET` | Bearer para `GET /api/cron/sync` (Vercel Cron) | — |
 | `PORT` | Puerto base del servidor | `3000` |
 | `CORS_ORIGIN` | Orígenes permitidos separados por coma | `*` |
 | `TRUST_PROXY` | `1` detrás de Vercel/CDN | — |
@@ -173,6 +174,13 @@ npm run import:turso
 | `NODE_ENV` | `production` |
 
 4. Deploy. La entrada serverless es `api/index.js` (`vercel.json`).
+5. Configurá también `CRON_SECRET`: Vercel llama cada día a `/api/cron/sync` (11:00 UTC) y scrapea Paraná + Paraguay guardando en Turso.
+
+Sync manual:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" https://altura-rios.vercel.app/api/cron/sync
+```
 
 CLI opcional: `npx vercel` / `npx vercel --prod` (después de `npx vercel login`).
 
