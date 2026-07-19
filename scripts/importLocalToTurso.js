@@ -105,43 +105,60 @@ async function main() {
 
   const dbPasos = openLocal("pasos.sqlite");
   if (dbPasos) {
+    // Upsert por username (no por id local): evita perder usuarios si Turso
+    // ya tiene otras filas con esos ids (p. ej. usuarios de prueba).
     const users = dbPasos.prepare("SELECT * FROM users").all();
-    const nU = await flush(
-      client,
-      `INSERT OR IGNORE INTO users (id, username, password_hash, password_salt, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      users,
-      (r) => [r.id, r.username, r.password_hash, r.password_salt, r.created_at]
-    );
-    const sessions = dbPasos.prepare("SELECT * FROM sessions").all();
-    const nS = await flush(
-      client,
-      `INSERT OR REPLACE INTO sessions (token, user_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?)`,
-      sessions,
-      (r) => [r.token, r.user_id, r.created_at, r.expires_at]
-    );
+    const idMap = new Map(); // localUserId -> tursoUserId
+    let nU = 0;
+    for (const u of users) {
+      const existing = await client.execute({
+        sql: "SELECT id FROM users WHERE username = ? COLLATE NOCASE",
+        args: [u.username],
+      });
+      if (existing.rows.length) {
+        const tursoId = Number(existing.rows[0].id);
+        await client.execute({
+          sql: `UPDATE users SET password_hash = ?, password_salt = ?, created_at = ?
+                WHERE id = ?`,
+          args: [u.password_hash, u.password_salt, u.created_at, tursoId],
+        });
+        idMap.set(u.id, tursoId);
+      } else {
+        const ins = await client.execute({
+          sql: `INSERT INTO users (username, password_hash, password_salt, created_at)
+                VALUES (?, ?, ?, ?)`,
+          args: [u.username, u.password_hash, u.password_salt, u.created_at],
+        });
+        idMap.set(u.id, Number(ins.lastInsertRowid));
+      }
+      nU += 1;
+    }
+
+    // Sesiones locales suelen estar vencidas; no las importamos.
     const pasos = dbPasos.prepare("SELECT * FROM pasos").all();
-    const nP = await flush(
-      client,
-      `INSERT OR IGNORE INTO pasos
-        (id, user_id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      pasos,
-      (r) => [
-        r.id,
-        r.user_id,
-        r.fecha,
-        r.puerto,
-        r.altura,
-        r.paso,
-        r.profundidad,
-        r.ancho,
-        r.created_at,
-        r.updated_at,
-      ]
-    );
-    console.log(`pasos: ${nU} users, ${nS} sessions, ${nP} pasos`);
+    let nP = 0;
+    for (const p of pasos) {
+      const tursoUserId = idMap.get(p.user_id);
+      if (!tursoUserId) continue;
+      const r = await client.execute({
+        sql: `INSERT OR IGNORE INTO pasos
+          (user_id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          tursoUserId,
+          p.fecha,
+          p.puerto,
+          p.altura,
+          p.paso,
+          p.profundidad,
+          p.ancho,
+          p.created_at,
+          p.updated_at,
+        ],
+      });
+      nP += Number(r.rowsAffected || 0);
+    }
+    console.log(`pasos: ${nU} users sincronizados, ${nP} pasos`);
     dbPasos.close();
   }
 
