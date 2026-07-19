@@ -2,13 +2,11 @@ node_modules/
 data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm
-.env
-.env.local
-.env.*.local
+.env*
+!.env.example
 __pycache__/
 *.pyc
 croniter.pid
 croniter_daily.log
 .croniter_daily_last_run
 .vercel
-.env*
