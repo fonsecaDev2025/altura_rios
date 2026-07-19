@@ -1,0 +1,8 @@
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+test/
+*.md
+.github/
+croniter_daily.py
+croniter_daily.service

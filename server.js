@@ -133,7 +133,8 @@ const scrapeLimiter = rateLimit({
     if (wantsRefresh(req)) return false; // refresco forzado siempre cuenta
     try {
       const source = /paraguay/i.test(req.originalUrl) ? "paraguay" : "parana";
-      const snap = getCachedSnapshot(source);
+      // Solo memoria (sync): si no hay snap en RAM, no skipear.
+      const snap = memSnapshots.get(source);
       return !!(snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS);
     } catch {
       return false;
@@ -197,14 +198,14 @@ function snapshotAgeMs(scrapedAtIso) {
   return Number.isNaN(t) ? Infinity : Date.now() - t;
 }
 
-/** Devuelve el snapshot de una fuente desde memoria; si no está, lo carga de SQLite. */
-function getCachedSnapshot(source) {
+/** Devuelve el snapshot de una fuente desde memoria; si no está, lo carga de SQLite/Turso. */
+async function getCachedSnapshot(source) {
   let snap = memSnapshots.get(source);
   if (!snap) {
     try {
-      snap = getLatestSnapshot(source);
+      snap = await getLatestSnapshot(source);
     } catch (e) {
-      console.warn(`[cache ${source}] lectura SQLite falló:`, e.message);
+      console.warn(`[cache ${source}] lectura DB falló:`, e.message);
       snap = null;
     }
     if (snap) memSnapshots.set(source, snap);
@@ -346,33 +347,36 @@ app.use(
   })
 );
 
-// ─── Inicializar SQLite ───────────────────────────────────────────────────────
-try {
-  initDb();
-} catch (e) {
-  console.warn("[db alturas] No se pudo inicializar SQLite:", e.message);
-}
-try {
-  initDbParaguay();
-} catch (e) {
-  console.warn("[db paraguay] No se pudo inicializar SQLite:", e.message);
-}
-try {
-  initDbPasos();
-} catch (e) {
-  console.warn("[db pasos] No se pudo inicializar SQLite:", e.message);
-}
+// ─── Inicializar DB (SQLite local o Turso) ────────────────────────────────────
+const dbReady = Promise.all([initDb(), initDbParaguay(), initDbPasos()])
+  .then(() => {
+    console.log(
+      `[db] backend=${process.env.TURSO_DATABASE_URL ? "turso" : "sqlite-file"}`
+    );
+  })
+  .catch((e) => {
+    console.warn("[db] No se pudo inicializar:", e.message);
+  });
 
-// ─── Mantenimiento periódico de SQLite ────────────────────────────────────────
-// Trunca los WAL (evita que crezcan sin control) y purga sesiones vencidas.
+app.use(async (_req, _res, next) => {
+  try {
+    await dbReady;
+  } catch {
+    /* ya logueado */
+  }
+  next();
+});
+
+// ─── Mantenimiento periódico (solo proceso largo; no en Vercel serverless) ───
+const IS_VERCEL = Boolean(process.env.VERCEL);
 const MAINTENANCE_INTERVAL_MS =
   Number(process.env.MAINTENANCE_INTERVAL_MS) || 30 * 60 * 1000;
 
-function runDbMaintenance() {
+async function runDbMaintenance() {
   try {
-    maintenanceAlturas();
-    maintenanceParaguay();
-    const r = maintenancePasos();
+    await maintenanceAlturas();
+    await maintenanceParaguay();
+    const r = await maintenancePasos();
     if (r && r.sessionsRemoved > 0) {
       console.log(`[mantenimiento] ${r.sessionsRemoved} sesiones vencidas purgadas.`);
     }
@@ -381,8 +385,12 @@ function runDbMaintenance() {
   }
 }
 
-const maintenanceTimer = setInterval(runDbMaintenance, MAINTENANCE_INTERVAL_MS);
-maintenanceTimer.unref(); // no impide que el proceso cierre
+if (!IS_VERCEL) {
+  const maintenanceTimer = setInterval(() => {
+    runDbMaintenance();
+  }, MAINTENANCE_INTERVAL_MS);
+  maintenanceTimer.unref();
+}
 
 // ─── Rutas API ────────────────────────────────────────────────────────────────
 app.get("/api/data", async (req, res) => {
@@ -390,7 +398,7 @@ app.get("/api/data", async (req, res) => {
 
   // [1] Servir caché fresca (salvo que se pida ?refresh=1)
   if (!wantsRefresh(req)) {
-    const snap = getCachedSnapshot(SOURCE);
+    const snap = await getCachedSnapshot(SOURCE);
     if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
       return res.json({
         ok: true,
@@ -407,14 +415,14 @@ app.get("/api/data", async (req, res) => {
     let dbSaved = null;
     if (data.items && data.items.length > 0) {
       try {
-        dbSaved = saveUltimaExtraccionDelDia(data.items, data.scrapedAt);
+        dbSaved = await saveUltimaExtraccionDelDia(data.items, data.scrapedAt);
       } catch (dbErr) {
         console.error("[db]", dbErr);
-        data.warnings.push(`SQLite: ${dbErr.message}`);
+        data.warnings.push(`DB: ${dbErr.message}`);
       }
     }
     try {
-      saveSnapshot(SOURCE, data.scrapedAt, data);
+      await saveSnapshot(SOURCE, data.scrapedAt, data);
     } catch (snapErr) {
       console.warn("[cache parana] guardado falló:", snapErr.message);
     }
@@ -425,7 +433,7 @@ app.get("/api/data", async (req, res) => {
 
     // [3] Fallback: último snapshot disponible aunque esté vencido
     try {
-      const snap = getCachedSnapshot(SOURCE);
+      const snap = await getCachedSnapshot(SOURCE);
       if (snap) {
         const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
         const payload = snap.payload || {};
@@ -462,7 +470,7 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
 
   // [1] Servir caché fresca (salvo que se pida ?refresh=1)
   if (!wantsRefresh(req)) {
-    const snap = getCachedSnapshot(SOURCE);
+    const snap = await getCachedSnapshot(SOURCE);
     if (snap && snapshotAgeMs(snap.scrapedAt) < CACHE_TTL_MS) {
       return res.json({
         ok: true,
@@ -479,17 +487,17 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
     let dbSaved = null;
     if (data.items && data.items.length > 0) {
       try {
-        dbSaved = saveParaguayExtraccion(data.items, data.scrapedAt);
+        dbSaved = await saveParaguayExtraccion(data.items, data.scrapedAt);
         if (dbSaved && dbSaved.rowsSaved > 0) {
           console.log(`[db paraguay] ${dbSaved.rowsSaved} filas en ${dbSaved.dbPath}`);
         }
       } catch (dbErr) {
         console.error("[db paraguay]", dbErr);
-        data.warnings.push(`SQLite Paraguay: ${dbErr.message}`);
+        data.warnings.push(`DB Paraguay: ${dbErr.message}`);
       }
     }
     try {
-      saveSnapshot(SOURCE, data.scrapedAt, data);
+      await saveSnapshot(SOURCE, data.scrapedAt, data);
     } catch (snapErr) {
       console.warn("[cache paraguay] guardado falló:", snapErr.message);
     }
@@ -500,7 +508,7 @@ app.get("/api/rio-paraguay-dmh", async (req, res) => {
 
     // [3] Fallback: último snapshot disponible aunque esté vencido
     try {
-      const snap = getCachedSnapshot(SOURCE);
+      const snap = await getCachedSnapshot(SOURCE);
       if (snap) {
         const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
         const payload = snap.payload || {};
@@ -572,10 +580,10 @@ function clearSessionCookie(res) {
 }
 
 /** Middleware: exige sesión válida y deja el usuario en req.user. */
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
   try {
     const cookies = parseCookies(req);
-    const user = getUserBySession(cookies[SESSION_COOKIE]);
+    const user = await getUserBySession(cookies[SESSION_COOKIE]);
     if (!user) {
       return res
         .status(401)
@@ -589,11 +597,11 @@ function requireAuth(req, res, next) {
   }
 }
 
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", async (req, res) => {
   try {
     const { username, password } = req.body || {};
-    const user = createUser(username, password);
-    const { token } = createSession(user.id);
+    const user = await createUser(username, password);
+    const { token } = await createSession(user.id);
     setSessionCookie(res, token);
     res.status(201).json({ ok: true, user: { username: user.username } });
   } catch (err) {
@@ -601,16 +609,16 @@ app.post("/api/auth/register", (req, res) => {
   }
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   try {
     const { username, password } = req.body || {};
-    const user = authenticate(username, password);
+    const user = await authenticate(username, password);
     if (!user) {
       return res
         .status(401)
         .json({ ok: false, error: "Usuario o contraseña incorrectos." });
     }
-    const { token } = createSession(user.id);
+    const { token } = await createSession(user.id);
     setSessionCookie(res, token);
     res.json({ ok: true, user: { username: user.username } });
   } catch (err) {
@@ -619,10 +627,10 @@ app.post("/api/auth/login", (req, res) => {
   }
 });
 
-app.post("/api/auth/logout", (req, res) => {
+app.post("/api/auth/logout", async (req, res) => {
   try {
     const cookies = parseCookies(req);
-    deleteSession(cookies[SESSION_COOKIE]);
+    await deleteSession(cookies[SESSION_COOKIE]);
   } catch (err) {
     console.warn("[logout]", err.message);
   }
@@ -630,17 +638,17 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/auth/me", (req, res) => {
+app.get("/api/auth/me", async (req, res) => {
   const cookies = parseCookies(req);
-  const user = getUserBySession(cookies[SESSION_COOKIE]);
+  const user = await getUserBySession(cookies[SESSION_COOKIE]);
   if (!user) return res.status(401).json({ ok: false });
   res.json({ ok: true, user: { username: user.username } });
 });
 
 // ─── CRUD: pasos / profundidades / alturas (por usuario autenticado) ──────────
-app.get("/api/pasos", requireAuth, (req, res) => {
+app.get("/api/pasos", requireAuth, async (req, res) => {
   try {
-    const items = listPasos(req.user.id);
+    const items = await listPasos(req.user.id);
     res.json({ ok: true, count: items.length, items });
   } catch (err) {
     console.error("[GET /api/pasos]", err);
@@ -648,9 +656,9 @@ app.get("/api/pasos", requireAuth, (req, res) => {
   }
 });
 
-app.post("/api/pasos", requireAuth, (req, res) => {
+app.post("/api/pasos", requireAuth, async (req, res) => {
   try {
-    const item = createPaso(req.user.id, req.body);
+    const item = await createPaso(req.user.id, req.body);
     res.status(201).json({ ok: true, item });
   } catch (err) {
     console.error("[POST /api/pasos]", err);
@@ -658,13 +666,13 @@ app.post("/api/pasos", requireAuth, (req, res) => {
   }
 });
 
-app.put("/api/pasos/:id", requireAuth, (req, res) => {
+app.put("/api/pasos/:id", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ ok: false, error: "ID inválido." });
   }
   try {
-    const item = updatePaso(id, req.user.id, req.body);
+    const item = await updatePaso(id, req.user.id, req.body);
     if (!item) {
       return res.status(404).json({ ok: false, error: "Registro no encontrado." });
     }
@@ -675,13 +683,13 @@ app.put("/api/pasos/:id", requireAuth, (req, res) => {
   }
 });
 
-app.delete("/api/pasos/:id", requireAuth, (req, res) => {
+app.delete("/api/pasos/:id", requireAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ ok: false, error: "ID inválido." });
   }
   try {
-    const ok = deletePaso(id, req.user.id);
+    const ok = await deletePaso(id, req.user.id);
     if (!ok) {
       return res.status(404).json({ ok: false, error: "Registro no encontrado." });
     }
@@ -697,12 +705,14 @@ app.get("/api/health", (_req, res) => {
 });
 
 /** Series temporales (sparklines): ?source=parana|paraguay&dias=14 */
-app.get("/api/series", (req, res) => {
+app.get("/api/series", async (req, res) => {
   try {
     const source = String(req.query.source || "parana").toLowerCase();
     const dias = Math.max(1, Math.min(90, Number(req.query.dias) || 14));
     const series =
-      source === "paraguay" ? getSeriesParaguay(dias) : getSeriesAlturas(dias);
+      source === "paraguay"
+        ? await getSeriesParaguay(dias)
+        : await getSeriesAlturas(dias);
     res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
     res.json({ ok: true, source, dias, series });
   } catch (err) {
@@ -714,97 +724,97 @@ app.get("/api/series", (req, res) => {
   }
 });
 
-// ─── HTTP Server ──────────────────────────────────────────────────────────────
-const server = http.createServer(app);
+// ─── Export app (Vercel serverless) / listen local ───────────────────────────
+module.exports = app;
 
-// ─── [4] Timeouts de servidor ────────────────────────────────────────────────
-server.timeout = 35_000;          // cierra request si tarda > 35 s
-server.keepAliveTimeout = 65_000; // evita que proxies dejen conexiones colgadas
-server.headersTimeout = 70_000;   // debe ser > keepAliveTimeout
+const IS_SERVERLESS = Boolean(process.env.VERCEL);
 
-// ─── [5] Límite de conexiones simultáneas ────────────────────────────────────
-const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS) || 200;
-let connectionCount = 0;
+if (!IS_SERVERLESS) {
+  const server = http.createServer(app);
 
-server.on("connection", (socket) => {
-  connectionCount++;
+  // ─── [4] Timeouts de servidor ────────────────────────────────────────────────
+  server.timeout = 35_000;
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 70_000;
 
-  if (connectionCount > MAX_CONNECTIONS) {
-    console.warn(
-      `[security] Conexión rechazada: límite de ${MAX_CONNECTIONS} conexiones alcanzado`
-    );
-    socket.destroy();
-    connectionCount--;
-    return;
-  }
+  // ─── [5] Límite de conexiones simultáneas ────────────────────────────────────
+  const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS) || 200;
+  let connectionCount = 0;
 
-  // Timeout en sockets inactivos: 30 s
-  socket.setTimeout(30_000);
-  socket.on("timeout", () => socket.destroy());
-  socket.on("close", () => connectionCount--);
-  socket.on("error", () => connectionCount--);
-});
+  server.on("connection", (socket) => {
+    connectionCount++;
 
-// ─── [6] Shutdown ordenado ───────────────────────────────────────────────────
-function gracefulShutdown(code = 1, reason = "desconocida") {
-  console.log(`[shutdown] Razón: ${reason}. Cerrando servidor…`);
-  server.close(() => {
-    console.log("[shutdown] Servidor cerrado correctamente.");
-    process.exit(code);
+    if (connectionCount > MAX_CONNECTIONS) {
+      console.warn(
+        `[security] Conexión rechazada: límite de ${MAX_CONNECTIONS} conexiones alcanzado`
+      );
+      socket.destroy();
+      connectionCount--;
+      return;
+    }
+
+    socket.setTimeout(30_000);
+    socket.on("timeout", () => socket.destroy());
+    socket.on("close", () => connectionCount--);
+    socket.on("error", () => connectionCount--);
   });
-  // Si el cierre tarda más de 8 s, forzar salida
-  setTimeout(() => {
-    console.error("[shutdown] Timeout forzado.");
-    process.exit(code);
-  }, 8000).unref();
-}
 
-process.on("SIGTERM", () => gracefulShutdown(0, "SIGTERM"));
-process.on("SIGINT", () => gracefulShutdown(0, "SIGINT"));
-
-process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason);
-  // Solo log; no cerramos para no interrumpir otras requests activas
-});
-
-process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err.message, err.stack);
-  gracefulShutdown(1, "uncaughtException");
-});
-
-// ─── [7] Bind seguro ─────────────────────────────────────────────────────────
-// En dev: 127.0.0.1 (solo localhost). En prod: 0.0.0.0 (todas las interfaces).
-const BIND_HOST =
-  process.env.BIND_HOST ||
-  (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
-
-function listenWithFallback(port, attemptsLeft) {
-  if (attemptsLeft <= 0) {
-    console.error(
-      `No hay puerto libre entre ${BASE_PORT} y ${BASE_PORT + PORT_TRY_LIMIT - 1}.`
-    );
-    process.exit(1);
+  function gracefulShutdown(code = 1, reason = "desconocida") {
+    console.log(`[shutdown] Razón: ${reason}. Cerrando servidor…`);
+    server.close(() => {
+      console.log("[shutdown] Servidor cerrado correctamente.");
+      process.exit(code);
+    });
+    setTimeout(() => {
+      console.error("[shutdown] Timeout forzado.");
+      process.exit(code);
+    }, 8000).unref();
   }
 
-  server.once("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      console.warn(`Puerto ${port} en uso, probando ${port + 1}…`);
-      listenWithFallback(port + 1, attemptsLeft - 1);
-    } else {
-      console.error(err);
+  process.on("SIGTERM", () => gracefulShutdown(0, "SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown(0, "SIGINT"));
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[unhandledRejection]", reason);
+  });
+
+  process.on("uncaughtException", (err) => {
+    console.error("[uncaughtException]", err.message, err.stack);
+    gracefulShutdown(1, "uncaughtException");
+  });
+
+  const BIND_HOST =
+    process.env.BIND_HOST ||
+    (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
+
+  function listenWithFallback(port, attemptsLeft) {
+    if (attemptsLeft <= 0) {
+      console.error(
+        `No hay puerto libre entre ${BASE_PORT} y ${BASE_PORT + PORT_TRY_LIMIT - 1}.`
+      );
       process.exit(1);
     }
-  });
 
-  server.listen(port, BIND_HOST, () => {
-    server.removeAllListeners("error");
-    const addr = server.address();
-    const p = addr && addr.port;
-    console.log(`Servidor en http://${BIND_HOST}:${p}`);
-    console.log(`API datos: http://${BIND_HOST}:${p}/api/data`);
-    console.log(`Río Paraguay (DMH): http://${BIND_HOST}:${p}/paraguay.html`);
-    console.log(`Conexiones máx: ${MAX_CONNECTIONS} | Timeout: ${server.timeout / 1000}s`);
-  });
+    server.once("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.warn(`Puerto ${port} en uso, probando ${port + 1}…`);
+        listenWithFallback(port + 1, attemptsLeft - 1);
+      } else {
+        console.error(err);
+        process.exit(1);
+      }
+    });
+
+    server.listen(port, BIND_HOST, () => {
+      server.removeAllListeners("error");
+      const addr = server.address();
+      const p = addr && addr.port;
+      console.log(`Servidor en http://${BIND_HOST}:${p}`);
+      console.log(`API datos: http://${BIND_HOST}:${p}/api/data`);
+      console.log(`Río Paraguay (DMH): http://${BIND_HOST}:${p}/paraguay.html`);
+      console.log(`Conexiones máx: ${MAX_CONNECTIONS} | Timeout: ${server.timeout / 1000}s`);
+    });
+  }
+
+  listenWithFallback(BASE_PORT, PORT_TRY_LIMIT);
 }
-
-listenWithFallback(BASE_PORT, PORT_TRY_LIMIT);

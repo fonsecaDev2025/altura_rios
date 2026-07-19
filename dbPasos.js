@@ -1,72 +1,22 @@
 /**
- * Base de datos multiusuario para "Pasos y profundidades".
- * Archivo: data/pasos.sqlite (o PASOS_SQLITE_PATH).
- *
- * Tablas:
- *  - users    : credenciales (hash scrypt + salt). Sin dependencias externas.
- *  - sessions : tokens de sesión (cookie httpOnly), con expiración.
- *  - pasos    : registros de cada usuario (user_id), aislados por dueño.
+ * Pasos y profundidades (multiusuario).
+ * Local/Render: data/pasos.sqlite. Vercel: Turso (TURSO_DATABASE_URL).
  */
 
-const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const Database = require("better-sqlite3");
+const sql = require("./lib/sqlDriver");
 
 const dbDir = path.join(__dirname, "data");
 const pasosDbPath =
   process.env.PASOS_SQLITE_PATH || path.join(dbDir, "pasos.sqlite");
 
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-let db;
-
-function initDbPasos() {
-  if (db) return db;
-  fs.mkdirSync(dbDir, { recursive: true });
-  db = new Database(pasosDbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000"); // espera ante escrituras concurrentes
-  db.pragma("wal_autocheckpoint = 1000");
-  db.pragma("cache_size = -16000"); // ~16 MB de caché de páginas
-  db.pragma("mmap_size = 268435456"); // 256 MB de lectura vía mmap
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT NOT NULL UNIQUE,
-      password_hash TEXT NOT NULL,
-      password_salt TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS sessions (
-      token TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);
-    CREATE TABLE IF NOT EXISTS pasos (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      fecha TEXT NOT NULL,
-      puerto TEXT NOT NULL,
-      altura TEXT,
-      paso TEXT,
-      profundidad TEXT,
-      ancho TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE INDEX IF NOT EXISTS idx_pasos_user ON pasos (user_id, fecha DESC, id DESC);
-  `);
-  return db;
+async function initDbPasos() {
+  await sql.ensureSchema();
+  return { backend: sql.backendLabel(), dbPath: pasosDbPath };
 }
-
-// ─── Usuarios y contraseñas (scrypt nativo, sin dependencias) ─────────────────
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -82,9 +32,8 @@ function verifyPassword(password, salt, expectedHashHex) {
   );
 }
 
-/** Valida usuario/clave y crea el usuario. Lanza Error con mensaje legible. */
-function createUser(username, password) {
-  const database = initDbPasos();
+async function createUser(username, password) {
+  await sql.ensureSchema();
   const name = String(username || "").trim();
   const pass = String(password || "");
   if (name.length < 3 || name.length > 40) {
@@ -96,32 +45,33 @@ function createUser(username, password) {
   if (pass.length < 6) {
     throw new Error("La contraseña debe tener al menos 6 caracteres.");
   }
-  const exists = database
-    .prepare("SELECT 1 FROM users WHERE username = ? COLLATE NOCASE")
-    .get(name);
+  const exists = await sql.get(
+    "pasos",
+    "SELECT 1 AS ok FROM users WHERE username = ? COLLATE NOCASE",
+    [name]
+  );
   if (exists) {
     throw new Error("Ese nombre de usuario ya está registrado.");
   }
   const { salt, hash } = hashPassword(pass);
   const now = new Date().toISOString();
-  const info = database
-    .prepare(
-      `INSERT INTO users (username, password_hash, password_salt, created_at)
-       VALUES (?, ?, ?, ?)`
-    )
-    .run(name, hash, salt, now);
+  const info = await sql.run(
+    "pasos",
+    `INSERT INTO users (username, password_hash, password_salt, created_at)
+     VALUES (?, ?, ?, ?)`,
+    [name, hash, salt, now]
+  );
   return { id: info.lastInsertRowid, username: name };
 }
 
-/** Devuelve { id, username } si las credenciales son válidas, o null. */
-function authenticate(username, password) {
-  const database = initDbPasos();
+async function authenticate(username, password) {
+  await sql.ensureSchema();
   const name = String(username || "").trim();
-  const row = database
-    .prepare(
-      "SELECT id, username, password_hash, password_salt FROM users WHERE username = ? COLLATE NOCASE"
-    )
-    .get(name);
+  const row = await sql.get(
+    "pasos",
+    "SELECT id, username, password_hash, password_salt FROM users WHERE username = ? COLLATE NOCASE",
+    [name]
+  );
   if (!row) return null;
   if (!verifyPassword(password, row.password_salt, row.password_hash)) {
     return null;
@@ -129,69 +79,62 @@ function authenticate(username, password) {
   return { id: row.id, username: row.username };
 }
 
-// ─── Sesiones ─────────────────────────────────────────────────────────────────
-
-function createSession(userId) {
-  const database = initDbPasos();
+async function createSession(userId) {
+  await sql.ensureSchema();
   const token = crypto.randomBytes(32).toString("hex");
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
   const expiresAt = new Date(now + SESSION_TTL_MS).toISOString();
-  database
-    .prepare(
-      `INSERT INTO sessions (token, user_id, created_at, expires_at)
-       VALUES (?, ?, ?, ?)`
-    )
-    .run(token, userId, createdAt, expiresAt);
+  await sql.run(
+    "pasos",
+    `INSERT INTO sessions (token, user_id, created_at, expires_at)
+     VALUES (?, ?, ?, ?)`,
+    [token, userId, createdAt, expiresAt]
+  );
   return { token, expiresAt };
 }
 
-/** Devuelve { id, username } del dueño de un token válido y no vencido, o null. */
-function getUserBySession(token) {
+async function getUserBySession(token) {
   if (!token) return null;
-  const database = initDbPasos();
-  const row = database
-    .prepare(
-      `SELECT s.token, s.expires_at, u.id AS id, u.username AS username
-       FROM sessions s JOIN users u ON u.id = s.user_id
-       WHERE s.token = ?`
-    )
-    .get(String(token));
+  await sql.ensureSchema();
+  const row = await sql.get(
+    "pasos",
+    `SELECT s.token, s.expires_at, u.id AS id, u.username AS username
+     FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.token = ?`,
+    [String(token)]
+  );
   if (!row) return null;
   if (Date.parse(row.expires_at) <= Date.now()) {
-    database.prepare("DELETE FROM sessions WHERE token = ?").run(row.token);
+    await sql.run("pasos", "DELETE FROM sessions WHERE token = ?", [row.token]);
     return null;
   }
   return { id: row.id, username: row.username };
 }
 
-function deleteSession(token) {
+async function deleteSession(token) {
   if (!token) return false;
-  const database = initDbPasos();
-  const info = database
-    .prepare("DELETE FROM sessions WHERE token = ?")
-    .run(String(token));
+  await sql.ensureSchema();
+  const info = await sql.run("pasos", "DELETE FROM sessions WHERE token = ?", [
+    String(token),
+  ]);
   return info.changes > 0;
 }
 
-/** Borra todas las sesiones vencidas. Devuelve cuántas se eliminaron. */
-function cleanupExpiredSessions() {
-  const database = initDbPasos();
-  const info = database
-    .prepare("DELETE FROM sessions WHERE expires_at <= ?")
-    .run(new Date().toISOString());
+async function cleanupExpiredSessions() {
+  await sql.ensureSchema();
+  const info = await sql.run(
+    "pasos",
+    "DELETE FROM sessions WHERE expires_at <= ?",
+    [new Date().toISOString()]
+  );
   return info.changes;
 }
 
-/** Mantenimiento periódico: limpia sesiones vencidas y trunca el WAL. */
-function maintenancePasos() {
-  if (!db) return null;
-  const removed = cleanupExpiredSessions();
-  db.pragma("wal_checkpoint(TRUNCATE)");
+async function maintenancePasos() {
+  const removed = await cleanupExpiredSessions();
   return { sessionsRemoved: removed };
 }
-
-// ─── CRUD de pasos (siempre acotado al user_id dueño) ─────────────────────────
 
 function normalizePaso(input) {
   const data = input || {};
@@ -210,63 +153,85 @@ function normalizePaso(input) {
   };
 }
 
-function listPasos(userId) {
-  const database = initDbPasos();
-  return database
-    .prepare(
-      `SELECT id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at
-       FROM pasos WHERE user_id = ?
-       ORDER BY fecha DESC, id DESC`
-    )
-    .all(Number(userId));
+async function listPasos(userId) {
+  await sql.ensureSchema();
+  return sql.all(
+    "pasos",
+    `SELECT id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at
+     FROM pasos WHERE user_id = ?
+     ORDER BY fecha DESC, id DESC`,
+    [Number(userId)]
+  );
 }
 
-function getPaso(id, userId) {
-  const database = initDbPasos();
-  const row = database
-    .prepare(
-      `SELECT id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at
-       FROM pasos WHERE id = ? AND user_id = ?`
-    )
-    .get(Number(id), Number(userId));
+async function getPaso(id, userId) {
+  await sql.ensureSchema();
+  const row = await sql.get(
+    "pasos",
+    `SELECT id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at
+     FROM pasos WHERE id = ? AND user_id = ?`,
+    [Number(id), Number(userId)]
+  );
   return row || null;
 }
 
-function createPaso(userId, input) {
-  const database = initDbPasos();
+async function createPaso(userId, input) {
+  await sql.ensureSchema();
   const p = normalizePaso(input);
   const now = new Date().toISOString();
-  const info = database
-    .prepare(
-      `INSERT INTO pasos (user_id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at)
-       VALUES (@user_id, @fecha, @puerto, @altura, @paso, @profundidad, @ancho, @created_at, @updated_at)`
-    )
-    .run({ ...p, user_id: Number(userId), created_at: now, updated_at: now });
+  const info = await sql.run(
+    "pasos",
+    `INSERT INTO pasos (user_id, fecha, puerto, altura, paso, profundidad, ancho, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      Number(userId),
+      p.fecha,
+      p.puerto,
+      p.altura,
+      p.paso,
+      p.profundidad,
+      p.ancho,
+      now,
+      now,
+    ]
+  );
   return getPaso(info.lastInsertRowid, userId);
 }
 
-function updatePaso(id, userId, input) {
-  const database = initDbPasos();
-  if (!getPaso(id, userId)) return null;
+async function updatePaso(id, userId, input) {
+  await sql.ensureSchema();
+  if (!(await getPaso(id, userId))) return null;
   const p = normalizePaso(input);
   const now = new Date().toISOString();
-  database
-    .prepare(
-      `UPDATE pasos SET
-         fecha = @fecha, puerto = @puerto, altura = @altura,
-         paso = @paso, profundidad = @profundidad, ancho = @ancho,
-         updated_at = @updated_at
-       WHERE id = @id AND user_id = @user_id`
-    )
-    .run({ ...p, updated_at: now, id: Number(id), user_id: Number(userId) });
+  await sql.run(
+    "pasos",
+    `UPDATE pasos SET
+       fecha = ?, puerto = ?, altura = ?,
+       paso = ?, profundidad = ?, ancho = ?,
+       updated_at = ?
+     WHERE id = ? AND user_id = ?`,
+    [
+      p.fecha,
+      p.puerto,
+      p.altura,
+      p.paso,
+      p.profundidad,
+      p.ancho,
+      now,
+      Number(id),
+      Number(userId),
+    ]
+  );
   return getPaso(id, userId);
 }
 
-function deletePaso(id, userId) {
-  const database = initDbPasos();
-  const info = database
-    .prepare("DELETE FROM pasos WHERE id = ? AND user_id = ?")
-    .run(Number(id), Number(userId));
+async function deletePaso(id, userId) {
+  await sql.ensureSchema();
+  const info = await sql.run(
+    "pasos",
+    "DELETE FROM pasos WHERE id = ? AND user_id = ?",
+    [Number(id), Number(userId)]
+  );
   return info.changes > 0;
 }
 

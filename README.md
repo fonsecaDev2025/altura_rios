@@ -2,22 +2,22 @@
 
 Dashboard web para consultar alturas hidrométricas de ríos, con datos obtenidos desde fuentes públicas de FICH/UNL y DMH Paraguay.
 
-El proyecto incluye un servidor Express, una interfaz web estática, parsers livianos basados en HTML y persistencia local con SQLite.
+El proyecto incluye un servidor Express, una interfaz web estática, parsers livianos basados en HTML y persistencia con SQLite local (dev/Render) o [Turso](https://turso.tech) (Vercel).
 
 ## Características
 
 - Dashboard para alturas de la cuenca del Paraná.
 - Vista separada para estaciones convencionales del Río Paraguay publicadas por DMH Paraguay.
 - API REST para consultar datos en formato JSON.
-- Persistencia diaria en SQLite.
-- Scripts para importar históricos y actualizar datos locales.
-- Configuración lista para desplegar en Render.
+- Persistencia diaria (SQLite local o Turso en la nube).
+- Scripts para importar históricos y actualizar datos.
+- Despliegue en Vercel (+ Turso) o Render (disco + SQLite).
 
 ## Tecnologías
 
 - Node.js 18 o superior
 - Express
-- better-sqlite3
+- better-sqlite3 (local) / @libsql/client + Turso (Vercel)
 - HTML, CSS y JavaScript vanilla
 - Python 3 para el daemon diario opcional
 
@@ -107,16 +107,20 @@ Obtiene estaciones convencionales del Río Paraguay desde DMH Paraguay y guarda 
 
 ## Variables de entorno
 
-El proyecto funciona localmente sin configuración adicional, pero estas variables permiten personalizar rutas, CORS, tiempos de espera y sincronización local:
+Copiá `.env.example` a `.env` si usás Turso en local. Sin `TURSO_DATABASE_URL` se usan archivos SQLite en `data/`.
 
 | Variable | Descripción | Valor por defecto |
 | --- | --- | --- |
+| `TURSO_DATABASE_URL` | URL libsql de Turso (requerida en Vercel) | — |
+| `TURSO_AUTH_TOKEN` | Token de Turso | — |
 | `PORT` | Puerto base del servidor | `3000` |
 | `CORS_ORIGIN` | Orígenes permitidos separados por coma | `*` |
+| `TRUST_PROXY` | `1` detrás de Vercel/CDN | — |
 | `FETCH_TIMEOUT_MS` | Timeout para consultar FICH/UNL | `30000` |
 | `FETCH_RETRIES` | Cantidad de reintentos de fetch | `2` |
-| `SQLITE_PATH` | Ruta de la base SQLite principal | `data/alturas.sqlite` |
-| `PARAGUAY_SQLITE_PATH` | Ruta de la base SQLite de DMH Paraguay | `data/paraguay_dmh.sqlite` |
+| `SQLITE_PATH` | Ruta SQLite principal (sin Turso) | `data/alturas.sqlite` |
+| `PARAGUAY_SQLITE_PATH` | Ruta SQLite Paraguay (sin Turso) | `data/paraguay_dmh.sqlite` |
+| `PASOS_SQLITE_PATH` | Ruta SQLite pasos (sin Turso) | `data/pasos.sqlite` |
 | `DAILY_COMMAND` | Comando diario usado por `croniter_daily.py` | `npm run sync:paraguay` |
 
 ## Persistencia local
@@ -145,14 +149,38 @@ npm run sync:paraguay
 
 También se incluye `croniter_daily.service` para usarlo como servicio systemd.
 
-## Despliegue
+## Despliegue en Vercel (recomendado)
 
-El archivo `render.yaml` define:
+Vercel no permite SQLite en disco. La app usa Turso cuando están definidas `TURSO_*`.
 
-- Un servicio web Node.js para la aplicación.
-- Un cron job diario para ejecutar tareas programadas.
+1. Creá una base en [Turso](https://turso.tech) y obtené `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`.
+2. Migrá el esquema e importá tus datos locales (una vez):
 
-Para desplegar en Render, conectá el repositorio y configurá las variables de entorno necesarias para tu entorno.
+```bash
+export TURSO_DATABASE_URL=libsql://...
+export TURSO_AUTH_TOKEN=...
+npm run migrate:turso
+npm run import:turso
+```
+
+3. En [Vercel](https://vercel.com): Importá el repo `altura_rios` y configurá en Environment Variables:
+
+| Variable | Valor |
+| --- | --- |
+| `TURSO_DATABASE_URL` | tu URL libsql |
+| `TURSO_AUTH_TOKEN` | tu token |
+| `TRUST_PROXY` | `1` |
+| `NODE_ENV` | `production` |
+
+4. Deploy. La entrada serverless es `api/index.js` (`vercel.json`).
+
+CLI opcional: `npx vercel` / `npx vercel --prod` (después de `npx vercel login`).
+
+**Importante:** no subas el token al repo. Si lo pegaste en un chat, rotálo en el dashboard de Turso.
+
+## Despliegue en Render
+
+El archivo `render.yaml` define un servicio web Node.js y un cron. Con disco en `/var/data` podés seguir usando SQLite (sin Turso).
 
 ## Fuentes de datos
 

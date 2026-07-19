@@ -7,22 +7,30 @@
   "scripts": {
     "build:pages": "node scripts/gen-pages-config.cjs",
     "start": "node server.js",
+    "start:clean": "bash scripts/startClean.sh",
     "dev": "node server.js",
+    "stop": "bash scripts/stopServers.sh",
     "lint": "eslint .",
     "test": "node --test 'test/*.test.js'",
     "import:historico": "node scripts/importHistorico.js",
     "sync:paraguay": "node scripts/syncParaguayDmh.js",
     "recuperar:faltantes": "node scripts/recuperarFaltantes.js",
-    "db:studio": "node scripts/dbStudio.js"
+    "db:studio": "node scripts/dbStudio.js",
+    "migrate:turso": "node scripts/migrateTurso.js",
+    "import:turso": "node scripts/importLocalToTurso.js",
+    "vercel:dev": "vercel dev"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "@libsql/client": "^0.17.4",
     "express": "^4.22.1",
     "express-rate-limit": "^8.5.1",
     "helmet": "^8.1.0"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.10.0"
   },
   "keywords": [],
   "author": "",

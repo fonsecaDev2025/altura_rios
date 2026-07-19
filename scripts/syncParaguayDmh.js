@@ -48,7 +48,7 @@ async function main() {
 
   let outParaguay;
   try {
-    outParaguay = saveParaguayExtraccion(items, scrapedAt);
+    outParaguay = await saveParaguayExtraccion(items, scrapedAt);
   } catch (err) {
     throw new Error(`Error guardando en paraguay_dmh.sqlite: ${err.message}`, { cause: err });
   }
@@ -63,7 +63,7 @@ async function main() {
 
   let outAlturas;
   try {
-    outAlturas = saveUltimaExtraccionDelDia(itemsAlturas, scrapedAt);
+    outAlturas = await saveUltimaExtraccionDelDia(itemsAlturas, scrapedAt);
   } catch (err) {
     throw new Error(`Error guardando en alturas.sqlite: ${err.message}`, { cause: err });
   }

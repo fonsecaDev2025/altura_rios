@@ -1,18 +1,16 @@
 /**
- * SQLite: guarda la última extracción del día por puerto (solo campos acordados).
- * Ruta del archivo: data/alturas.sqlite o SQLITE_PATH.
+ * Persistencia alturas + paraguay.
+ * Local/Render: archivos SQLite. Vercel: Turso (TURSO_DATABASE_URL).
  */
 
-const fs = require("fs");
 const path = require("path");
-const Database = require("better-sqlite3");
+const sql = require("./lib/sqlDriver");
 
 const dbDir = path.join(__dirname, "data");
 const dbPath = process.env.SQLITE_PATH || path.join(dbDir, "alturas.sqlite");
+const paraguayDbPath =
+  process.env.PARAGUAY_SQLITE_PATH || path.join(dbDir, "paraguay_dmh.sqlite");
 
-let db;
-
-/** Día calendario en Argentina (YYYY-MM-DD) para agrupar “última extracción del día”. */
 function fechaDiaArgentina(date) {
   return new Intl.DateTimeFormat("sv-SE", {
     timeZone: "America/Argentina/Buenos_Aires",
@@ -22,99 +20,67 @@ function fechaDiaArgentina(date) {
   }).format(date);
 }
 
-function initDb() {
-  if (db) return db;
-  fs.mkdirSync(dbDir, { recursive: true });
-  db = new Database(dbPath);
-  // WAL: permite leer mientras se escribe sin bloqueos (mejor para servir caché).
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("busy_timeout = 5000"); // espera ante escrituras concurrentes en vez de fallar
-  db.pragma("wal_autocheckpoint = 1000"); // checkpoint automático cada ~1000 páginas
-  db.pragma("cache_size = -16000"); // ~16 MB de caché de páginas en memoria
-  db.pragma("mmap_size = 268435456"); // 256 MB de lectura vía mmap
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS extracciones_dia (
-      fecha_dia TEXT NOT NULL,
-      puerto TEXT NOT NULL,
-      ultimo_registro TEXT,
-      variacion TEXT,
-      estado TEXT,
-      registro_anterior TEXT,
-      extracted_at TEXT NOT NULL,
-      PRIMARY KEY (fecha_dia, puerto)
-    );
-    CREATE TABLE IF NOT EXISTS snapshots (
-      source TEXT NOT NULL,
-      scraped_at TEXT NOT NULL,
-      payload_json TEXT NOT NULL,
-      PRIMARY KEY (source, scraped_at)
-    );
-    CREATE INDEX IF NOT EXISTS idx_snapshots_source_time
-      ON snapshots (source, scraped_at DESC);
-    -- Limpieza: tabla 'pasos' huérfana de versiones previas (los pasos reales
-    -- viven en pasos.sqlite). Se elimina para no dejar datos muertos acá.
-    DROP TABLE IF EXISTS pasos;
-  `);
-  return db;
+function fechaDmYToIso(fecha) {
+  const p = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(fecha || "").trim());
+  if (!p) return null;
+  return `${p[3]}-${p[2]}-${p[1]}`;
 }
 
-/**
- * Mantenimiento periódico: trunca el WAL para que no crezca sin control.
- * Seguro de llamar en caliente; no bloquea lecturas con WAL.
- */
-function maintenanceAlturas() {
-  if (!db) return null;
-  return db.pragma("wal_checkpoint(TRUNCATE)");
+async function initDb() {
+  await sql.ensureSchema();
+  return { backend: sql.backendLabel(), dbPath };
 }
 
-/**
- * Guarda el payload completo de una extracción como snapshot JSON.
- * Sirve de caché para responder rápido y como respaldo si la fuente falla.
- * Conserva los últimos 50 snapshots por fuente.
- */
-function saveSnapshot(source, scrapedAtIso, payload) {
-  const database = initDb();
-  database
-    .prepare(
-      `INSERT INTO snapshots (source, scraped_at, payload_json)
-       VALUES (@source, @scraped_at, @payload_json)
-       ON CONFLICT(source, scraped_at) DO UPDATE SET
-         payload_json = excluded.payload_json`
-    )
-    .run({
-      source,
-      scraped_at: scrapedAtIso,
-      payload_json: JSON.stringify(payload),
-    });
+async function initDbParaguay() {
+  await sql.ensureSchema();
+  return { backend: sql.backendLabel(), dbPath: paraguayDbPath };
+}
 
-  database
-    .prepare(
-      `DELETE FROM snapshots
-       WHERE source = @source
-         AND scraped_at NOT IN (
-           SELECT scraped_at FROM snapshots
-           WHERE source = @source
-           ORDER BY scraped_at DESC
-           LIMIT 10
-         )`
-    )
-    .run({ source });
+async function maintenanceAlturas() {
+  return null;
+}
+
+async function maintenanceParaguay() {
+  return null;
+}
+
+async function saveSnapshot(source, scrapedAtIso, payload) {
+  await sql.ensureSchema();
+  await sql.run(
+    "alturas",
+    `INSERT INTO snapshots (source, scraped_at, payload_json)
+     VALUES (?, ?, ?)
+     ON CONFLICT(source, scraped_at) DO UPDATE SET
+       payload_json = excluded.payload_json`,
+    [source, scrapedAtIso, JSON.stringify(payload)]
+  );
+
+  await sql.run(
+    "alturas",
+    `DELETE FROM snapshots
+     WHERE source = ?
+       AND scraped_at NOT IN (
+         SELECT scraped_at FROM snapshots
+         WHERE source = ?
+         ORDER BY scraped_at DESC
+         LIMIT 10
+       )`,
+    [source, source]
+  );
 
   return { source, scrapedAt: scrapedAtIso };
 }
 
-/** Devuelve el último snapshot de una fuente: { scrapedAt, payload } o null. */
-function getLatestSnapshot(source) {
-  const database = initDb();
-  const row = database
-    .prepare(
-      `SELECT scraped_at, payload_json FROM snapshots
-       WHERE source = @source
-       ORDER BY scraped_at DESC
-       LIMIT 1`
-    )
-    .get({ source });
+async function getLatestSnapshot(source) {
+  await sql.ensureSchema();
+  const row = await sql.get(
+    "alturas",
+    `SELECT scraped_at, payload_json FROM snapshots
+     WHERE source = ?
+     ORDER BY scraped_at DESC
+     LIMIT 1`,
+    [source]
+  );
   if (!row) return null;
   try {
     return { scrapedAt: row.scraped_at, payload: JSON.parse(row.payload_json) };
@@ -123,181 +89,101 @@ function getLatestSnapshot(source) {
   }
 }
 
-/**
- * items: objetos del scraper con puerto, ultimoRegistro, variacion, estado, registroAnterior.
- * Misma fecha_día + mismo puerto → se sobrescribe (queda la última extracción del día).
- */
-function saveUltimaExtraccionDelDia(items, scrapedAtIso) {
-  const database = initDb();
+async function saveUltimaExtraccionDelDia(items, scrapedAtIso) {
+  await sql.ensureSchema();
   const fechaDia = fechaDiaArgentina(new Date(scrapedAtIso));
   const extractedAt = scrapedAtIso;
+  const batch = [];
 
-  const stmt = database.prepare(`
-    INSERT INTO extracciones_dia (
-      fecha_dia, puerto, ultimo_registro, variacion, estado, registro_anterior, extracted_at
-    ) VALUES (
-      @fecha_dia, @puerto, @ultimo_registro, @variacion, @estado, @registro_anterior, @extracted_at
-    )
-    ON CONFLICT(fecha_dia, puerto) DO UPDATE SET
-      ultimo_registro = excluded.ultimo_registro,
-      variacion = excluded.variacion,
-      estado = excluded.estado,
-      registro_anterior = excluded.registro_anterior,
-      extracted_at = excluded.extracted_at
-  `);
-
-  let n = 0;
-  const tx = database.transaction((rows) => {
-    for (const row of rows) {
-      const puerto = (row.puerto || "").trim();
-      if (!puerto) continue;
-      const altura = row.altura ?? row.ultimoRegistro ?? "";
-      const altAnt = row.alturaAnterior ?? row.registroAnterior ?? "";
-      stmt.run({
-        fecha_dia: fechaDia,
+  for (const row of items || []) {
+    const puerto = (row.puerto || "").trim();
+    if (!puerto) continue;
+    const altura = row.altura ?? row.ultimoRegistro ?? "";
+    const altAnt = row.alturaAnterior ?? row.registroAnterior ?? "";
+    batch.push({
+      sql: `INSERT INTO extracciones_dia (
+          fecha_dia, puerto, ultimo_registro, variacion, estado, registro_anterior, extracted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(fecha_dia, puerto) DO UPDATE SET
+          ultimo_registro = excluded.ultimo_registro,
+          variacion = excluded.variacion,
+          estado = excluded.estado,
+          registro_anterior = excluded.registro_anterior,
+          extracted_at = excluded.extracted_at`,
+      args: [
+        fechaDia,
         puerto,
-        ultimo_registro: altura != null ? String(altura) : "",
-        variacion: row.variacion != null ? String(row.variacion) : "",
-        estado: row.estado != null ? String(row.estado) : "",
-        registro_anterior: altAnt != null ? String(altAnt) : "",
-        extracted_at: extractedAt,
-      });
-      n += 1;
-    }
-  });
-
-  tx(items);
-  return { fechaDia, rowsSaved: n, dbPath };
-}
-
-/** Mantenimiento de la base Paraguay: trunca su WAL. */
-function maintenanceParaguay() {
-  if (!dbParaguay) return null;
-  return dbParaguay.pragma("wal_checkpoint(TRUNCATE)");
-}
-
-/** Base aparte: DMH Paraguay — Río Paraguay (convencionales). */
-const paraguayDbPath =
-  process.env.PARAGUAY_SQLITE_PATH || path.join(dbDir, "paraguay_dmh.sqlite");
-
-let dbParaguay;
-
-/** DD-MM-YYYY → YYYY-MM-DD para ordenar / consultar. */
-function fechaDmYToIso(fecha) {
-  const p = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(fecha || "").trim());
-  if (!p) return null;
-  return `${p[3]}-${p[2]}-${p[1]}`;
-}
-
-function initDbParaguay() {
-  if (dbParaguay) return dbParaguay;
-  fs.mkdirSync(dbDir, { recursive: true });
-  dbParaguay = new Database(paraguayDbPath);
-  dbParaguay.pragma("journal_mode = WAL");
-  dbParaguay.pragma("synchronous = NORMAL");
-  dbParaguay.pragma("busy_timeout = 5000");
-  dbParaguay.pragma("wal_autocheckpoint = 1000");
-  dbParaguay.pragma("cache_size = -16000");
-  dbParaguay.pragma("mmap_size = 268435456");
-  dbParaguay.exec(`
-    CREATE TABLE IF NOT EXISTS rio_paraguay_dmh (
-      fecha TEXT NOT NULL,
-      fecha_iso TEXT,
-      localidad TEXT NOT NULL,
-      nivel_del_dia TEXT,
-      variacion_diaria TEXT,
-      minimo_historico TEXT,
-      maximo_historico TEXT,
-      ver_mas_url TEXT,
-      extracted_at TEXT NOT NULL,
-      PRIMARY KEY (fecha, localidad)
-    );
-    CREATE INDEX IF NOT EXISTS idx_paraguay_fecha_iso ON rio_paraguay_dmh (fecha_iso);
-  `);
-  return dbParaguay;
-}
-
-/**
- * items: salida de parseRioParaguay (localidad, fecha, nivelDelDia, …).
- * Misma fecha + localidad → se actualiza (última extracción).
- */
-function saveParaguayExtraccion(items, scrapedAtIso) {
-  if (fs.existsSync(paraguayDbPath)) {
-    try {
-      fs.accessSync(paraguayDbPath, fs.constants.W_OK);
-    } catch (e) {
-      const err = new Error(
-        `Sin permiso de escritura en ${paraguayDbPath} (${e.code || e.message}). Ej.: sudo chown "$USER:$USER" data/paraguay_dmh.sqlite`
-      );
-      err.code = e.code;
-      throw err;
-    }
+        altura != null ? String(altura) : "",
+        row.variacion != null ? String(row.variacion) : "",
+        row.estado != null ? String(row.estado) : "",
+        altAnt != null ? String(altAnt) : "",
+        extractedAt,
+      ],
+    });
   }
-  const database = initDbParaguay();
-  const extractedAt = scrapedAtIso;
 
-  const stmt = database.prepare(`
-    INSERT INTO rio_paraguay_dmh (
-      fecha, fecha_iso, localidad, nivel_del_dia, variacion_diaria,
-      minimo_historico, maximo_historico, ver_mas_url, extracted_at
-    ) VALUES (
-      @fecha, @fecha_iso, @localidad, @nivel_del_dia, @variacion_diaria,
-      @minimo_historico, @maximo_historico, @ver_mas_url, @extracted_at
-    )
-    ON CONFLICT(fecha, localidad) DO UPDATE SET
-      fecha_iso = excluded.fecha_iso,
-      nivel_del_dia = excluded.nivel_del_dia,
-      variacion_diaria = excluded.variacion_diaria,
-      minimo_historico = excluded.minimo_historico,
-      maximo_historico = excluded.maximo_historico,
-      ver_mas_url = excluded.ver_mas_url,
-      extracted_at = excluded.extracted_at
-  `);
-
-  let n = 0;
-  const tx = database.transaction((rows) => {
-    for (const row of rows) {
-      const localidad = (row.localidad || "").trim();
-      const fecha = (row.fecha || "").trim();
-      if (!localidad || !fecha) continue;
-      const fechaIso = fechaDmYToIso(fecha);
-      stmt.run({
-        fecha,
-        fecha_iso: fechaIso,
-        localidad,
-        nivel_del_dia: row.nivelDelDia != null ? String(row.nivelDelDia) : "",
-        variacion_diaria:
-          row.variacionDiaria != null ? String(row.variacionDiaria) : "",
-        minimo_historico:
-          row.minimoHistoricoFecha != null ? String(row.minimoHistoricoFecha) : "",
-        maximo_historico:
-          row.maximoHistoricoFecha != null ? String(row.maximoHistoricoFecha) : "",
-        ver_mas_url: row.verMasUrl != null ? String(row.verMasUrl) : "",
-        extracted_at: extractedAt,
-      });
-      n += 1;
-    }
-  });
-
-  tx(items);
-  return { rowsSaved: n, dbPath: paraguayDbPath };
+  if (batch.length) await sql.batch("alturas", batch);
+  return {
+    fechaDia,
+    rowsSaved: batch.length,
+    dbPath: sql.useTurso() ? "turso" : dbPath,
+  };
 }
 
-/**
- * Series temporales para sparklines (últimos `dias` por puerto).
- * @returns {Record<string, Array<{fecha: string, altura: string}>>}
- */
-function getSeriesAlturas(dias = 14) {
-  const database = initDb();
+async function saveParaguayExtraccion(items, scrapedAtIso) {
+  await sql.ensureSchema();
+  const batch = [];
+
+  for (const row of items || []) {
+    const localidad = (row.localidad || "").trim();
+    const fecha = (row.fecha || "").trim();
+    if (!localidad || !fecha) continue;
+    const fechaIso = fechaDmYToIso(fecha);
+    batch.push({
+      sql: `INSERT INTO rio_paraguay_dmh (
+          fecha, fecha_iso, localidad, nivel_del_dia, variacion_diaria,
+          minimo_historico, maximo_historico, ver_mas_url, extracted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(fecha, localidad) DO UPDATE SET
+          fecha_iso = excluded.fecha_iso,
+          nivel_del_dia = excluded.nivel_del_dia,
+          variacion_diaria = excluded.variacion_diaria,
+          minimo_historico = excluded.minimo_historico,
+          maximo_historico = excluded.maximo_historico,
+          ver_mas_url = excluded.ver_mas_url,
+          extracted_at = excluded.extracted_at`,
+      args: [
+        fecha,
+        fechaIso,
+        localidad,
+        row.nivelDelDia != null ? String(row.nivelDelDia) : "",
+        row.variacionDiaria != null ? String(row.variacionDiaria) : "",
+        row.minimoHistoricoFecha != null ? String(row.minimoHistoricoFecha) : "",
+        row.maximoHistoricoFecha != null ? String(row.maximoHistoricoFecha) : "",
+        row.verMasUrl != null ? String(row.verMasUrl) : "",
+        scrapedAtIso,
+      ],
+    });
+  }
+
+  if (batch.length) await sql.batch("paraguay", batch);
+  return {
+    rowsSaved: batch.length,
+    dbPath: sql.useTurso() ? "turso" : paraguayDbPath,
+  };
+}
+
+async function getSeriesAlturas(dias = 14) {
+  await sql.ensureSchema();
   const n = Math.max(1, Math.min(90, Number(dias) || 14));
-  const rows = database
-    .prepare(
-      `SELECT puerto, fecha_dia AS fecha, ultimo_registro AS altura
-       FROM extracciones_dia
-       WHERE fecha_dia >= date('now', ?)
-       ORDER BY puerto ASC, fecha_dia ASC`
-    )
-    .all(`-${n} days`);
+  const rows = await sql.all(
+    "alturas",
+    `SELECT puerto, fecha_dia AS fecha, ultimo_registro AS altura
+     FROM extracciones_dia
+     WHERE fecha_dia >= date('now', ?)
+     ORDER BY puerto ASC, fecha_dia ASC`,
+    [`-${n} days`]
+  );
   const out = {};
   for (const r of rows) {
     const key = (r.puerto || "").trim();
@@ -308,22 +194,18 @@ function getSeriesAlturas(dias = 14) {
   return out;
 }
 
-/**
- * Series temporales Paraguay (últimos `dias` por localidad).
- * @returns {Record<string, Array<{fecha: string, altura: string}>>}
- */
-function getSeriesParaguay(dias = 14) {
-  const database = initDbParaguay();
+async function getSeriesParaguay(dias = 14) {
+  await sql.ensureSchema();
   const n = Math.max(1, Math.min(90, Number(dias) || 14));
-  const rows = database
-    .prepare(
-      `SELECT localidad AS puerto, fecha_iso AS fecha, nivel_del_dia AS altura
-       FROM rio_paraguay_dmh
-       WHERE fecha_iso IS NOT NULL
-         AND fecha_iso >= date('now', ?)
-       ORDER BY localidad ASC, fecha_iso ASC`
-    )
-    .all(`-${n} days`);
+  const rows = await sql.all(
+    "paraguay",
+    `SELECT localidad AS puerto, fecha_iso AS fecha, nivel_del_dia AS altura
+     FROM rio_paraguay_dmh
+     WHERE fecha_iso IS NOT NULL
+       AND fecha_iso >= date('now', ?)
+     ORDER BY localidad ASC, fecha_iso ASC`,
+    [`-${n} days`]
+  );
   const out = {};
   for (const r of rows) {
     const key = (r.puerto || "").trim();
