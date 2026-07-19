@@ -79,6 +79,12 @@ npm run sync:paraguay
 
 Descarga datos de DMH Paraguay y los guarda en SQLite.
 
+```bash
+npm run recuperar:faltantes
+```
+
+Rellena días faltantes desde históricos (wfich + DMH). Con `TURSO_*` (o tras `npx vercel env pull .env.local`) escribe en Turso; sin Turso usa los SQLite locales.
+
 ## API
 
 ### Salud del servicio
