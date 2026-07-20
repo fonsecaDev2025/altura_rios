@@ -10,6 +10,3 @@ croniter.pid
 croniter_daily.log
 .croniter_daily_last_run
 .vercel
-
-# Consultas locales (Turso/Studio) — no desplegar
-Top_Queries.md

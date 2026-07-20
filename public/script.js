@@ -119,7 +119,7 @@ function rowMatchesFilter(row, q) {
   return hay.includes(q);
 }
 
-function renderTable() {
+function renderTable({ updateChips = false } = {}) {
   const q = el.filterInput.value.trim().toLowerCase();
   const items = lastItems.filter((row) => rowMatchesFilter(row, q));
 
@@ -133,7 +133,7 @@ function renderTable() {
 
   el.toolbar.hidden = false;
   el.legend.hidden = false;
-  renderRioChips();
+  if (updateChips) renderRioChips();
 
   const head = `
     <table class="data-table">
@@ -190,7 +190,7 @@ function renderTable() {
   el.tableSection.innerHTML = `<div class="table-scroll">${head}${rows}</tbody></table></div>${emptyFilter}`;
 }
 
-async function loadSeries() {
+async function fetchSeries() {
   try {
     const res = await UI.fetchWithTimeout(
       UI.apiUrl("/api/series?source=parana&dias=14"),
@@ -200,11 +200,12 @@ async function loadSeries() {
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.ok && data.series) {
       seriesByPuerto = data.series;
-      if (lastItems.length) renderTable();
+      return true;
     }
   } catch (e) {
     console.warn("[series]", e);
   }
+  return false;
 }
 
 async function fetchData(forceRefresh = false) {
@@ -212,15 +213,18 @@ async function fetchData(forceRefresh = false) {
   clearErrorState();
 
   try {
-    const res = await UI.fetchWithTimeout(apiDataUrl(forceRefresh), {}, FETCH_MS);
-    const data = await res.json().catch(() => ({}));
+    const [dataRes] = await Promise.all([
+      UI.fetchWithTimeout(apiDataUrl(forceRefresh), {}, FETCH_MS),
+      fetchSeries(),
+    ]);
+    const data = await dataRes.json().catch(() => ({}));
 
-    if (!res.ok || data.ok === false) {
+    if (!dataRes.ok || data.ok === false) {
       const msg =
         data.error ||
         (typeof formatApiHttpError !== "undefined"
-          ? formatApiHttpError(res.status, "/api/data")
-          : `Error HTTP ${res.status}`);
+          ? formatApiHttpError(dataRes.status, "/api/data")
+          : `Error HTTP ${dataRes.status}`);
       setError(msg);
       el.metaSection.hidden = true;
       el.toolbar.hidden = true;
@@ -233,7 +237,11 @@ async function fetchData(forceRefresh = false) {
 
     if (data.cached) {
       const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
-      el.statusText.textContent = data.stale
+      const sourceFail =
+        data.stale ||
+        (Array.isArray(data.warnings) &&
+          data.warnings.some((w) => /No se pudo actualizar/.test(String(w))));
+      el.statusText.textContent = sourceFail
         ? `Fuente no disponible. Mostrando datos en caché (hace ~${mins} min).`
         : `Datos en caché (hace ~${mins} min). Tocá «Actualizar» para refrescar.`;
     } else {
@@ -242,8 +250,7 @@ async function fetchData(forceRefresh = false) {
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderMeta(data);
     renderWarnings(data.warnings);
-    renderTable();
-    loadSeries();
+    renderTable({ updateChips: true });
   } catch (err) {
     console.error(err);
     if (err.name === "AbortError") {
@@ -262,12 +269,15 @@ async function fetchData(forceRefresh = false) {
 }
 
 el.btnRefresh.addEventListener("click", () => fetchData(true));
-el.filterInput.addEventListener("input", () => renderTable());
+el.filterInput.addEventListener(
+  "input",
+  UI.debounce(() => renderTable(), 180)
+);
 el.rioFilters.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-rio]");
   if (!btn) return;
   activeRio = btn.getAttribute("data-rio") || "";
-  renderTable();
+  renderTable({ updateChips: true });
 });
 
 document.addEventListener("DOMContentLoaded", () => {

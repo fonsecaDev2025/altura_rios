@@ -193,7 +193,7 @@ function renderTable() {
   el.tableRoot.innerHTML = `<div class="table-scroll">${head}${body}</tbody></table></div>${emptyFilter}`;
 }
 
-async function loadSeries() {
+async function fetchSeries() {
   try {
     const res = await UI.fetchWithTimeout(
       UI.apiUrl("/api/series?source=paraguay&dias=14"),
@@ -203,25 +203,29 @@ async function loadSeries() {
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.ok && data.series) {
       seriesByLoc = data.series;
-      if (lastItems.length) renderTable();
+      return true;
     }
   } catch (e) {
     console.warn("[series paraguay]", e);
   }
+  return false;
 }
 
 async function load(forceRefresh = false) {
   setLoading(true);
   clearError();
   try {
-    const res = await UI.fetchWithTimeout(apiParaguayUrl(forceRefresh), {}, FETCH_MS);
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
+    const [dataRes] = await Promise.all([
+      UI.fetchWithTimeout(apiParaguayUrl(forceRefresh), {}, FETCH_MS),
+      fetchSeries(),
+    ]);
+    const data = await dataRes.json().catch(() => ({}));
+    if (!dataRes.ok || data.ok === false) {
       setError(
         data.error ||
           (typeof formatApiHttpError !== "undefined"
-            ? formatApiHttpError(res.status, "/api/rio-paraguay-dmh")
-            : `Error HTTP ${res.status}`)
+            ? formatApiHttpError(dataRes.status, "/api/rio-paraguay-dmh")
+            : `Error HTTP ${dataRes.status}`)
       );
       el.metaSection.hidden = true;
       el.toolbar.hidden = true;
@@ -231,7 +235,11 @@ async function load(forceRefresh = false) {
     }
     if (data.cached) {
       const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
-      el.statusText.textContent = data.stale
+      const sourceFail =
+        data.stale ||
+        (Array.isArray(data.warnings) &&
+          data.warnings.some((w) => /No se pudo actualizar/.test(String(w))));
+      el.statusText.textContent = sourceFail
         ? `Fuente no disponible. Mostrando datos en caché (hace ~${mins} min).`
         : `Datos en caché (hace ~${mins} min). Tocá «Actualizar» para refrescar.`;
     } else {
@@ -249,7 +257,6 @@ async function load(forceRefresh = false) {
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderWarnings(data.warnings);
     renderTable();
-    loadSeries();
   } catch (e) {
     console.error(e);
     if (e.name === "AbortError") {
@@ -266,5 +273,8 @@ async function load(forceRefresh = false) {
 }
 
 el.btnRefresh.addEventListener("click", () => load(true));
-el.filterInput.addEventListener("input", () => renderTable());
+el.filterInput.addEventListener(
+  "input",
+  UI.debounce(() => renderTable(), 180)
+);
 document.addEventListener("DOMContentLoaded", () => load(false));

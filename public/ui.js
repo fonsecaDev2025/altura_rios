@@ -118,6 +118,14 @@
     return typeof resolveApiUrl !== "undefined" ? resolveApiUrl(path) : path;
   }
 
+  function debounce(fn, ms) {
+    let timer = null;
+    return function debounced(...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), ms == null ? 200 : ms);
+    };
+  }
+
   global.UI = {
     escapeHtml,
     parseNum,
@@ -129,5 +137,6 @@
     createColdStartWatcher,
     fetchWithTimeout,
     apiUrl,
+    debounce,
   };
 })(typeof window !== "undefined" ? window : globalThis);
