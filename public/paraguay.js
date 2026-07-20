@@ -80,13 +80,49 @@ function tendenciaFromVariacion(v) {
   return { label: "Estacionario", cls: "estado estado--estac" };
 }
 
-/** Altura anterior ≈ nivel del día − variación diaria (DMH no la publica aparte). */
-function alturaAnteriorFrom(nivel, variacion) {
-  const h = UI.parseNum(nivel);
-  const v = UI.parseNum(variacion);
+/** "20-07-2026" → "2026-07-20" */
+function fechaDmYToIso(fecha) {
+  const m = String(fecha || "")
+    .trim()
+    .match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+}
+
+/** Variación DMH suele venir en cm ("-1 cm"); devolver metros. */
+function parseVariacionMetros(variacion) {
+  const s = String(variacion || "").trim();
+  const n = UI.parseNum(s);
+  if (n == null) return null;
+  if (/\bcm\b/i.test(s)) return n / 100;
+  return n;
+}
+
+function formatAlturaM(n) {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const t = Math.round(n * 100) / 100;
+  return `${t.toFixed(2)} m`;
+}
+
+/** Preferir el registro del día previo en serie; fallback: altura − variación (cm→m). */
+function alturaAnteriorFor(row) {
+  const fechaIso = fechaDmYToIso(row.fecha);
+  const pts = seriesByLoc[row.localidad] || [];
+  if (pts.length && fechaIso) {
+    let prev = null;
+    for (const p of pts) {
+      if (p.fecha && p.fecha < fechaIso) prev = p;
+    }
+    if (prev && prev.altura) return String(prev.altura).trim();
+  } else if (pts.length >= 2) {
+    const ant = pts[pts.length - 2];
+    if (ant && ant.altura) return String(ant.altura).trim();
+  }
+
+  const h = UI.parseNum(row.nivelDelDia);
+  const v = parseVariacionMetros(row.variacionDiaria);
   if (h == null || v == null) return "—";
-  const ant = h - v;
-  return Number.isInteger(ant) ? String(ant) : ant.toFixed(2);
+  return formatAlturaM(h - v);
 }
 
 function renderTable() {
@@ -130,7 +166,7 @@ function renderTable() {
       const t = tendenciaFromVariacion(row.variacionDiaria);
       const level = "sin-dato";
       const spark = UI.sparklineSvg(seriesByLoc[row.localidad] || []);
-      const altAnt = alturaAnteriorFrom(row.nivelDelDia, row.variacionDiaria);
+      const altAnt = alturaAnteriorFor(row);
       const hist = row.verMasUrl
         ? `<a href="${UI.escapeHtml(row.verMasUrl)}" target="_blank" rel="noopener noreferrer" class="link-hist">Ver histórico de ${UI.escapeHtml(row.localidad)}</a>`
         : "—";
