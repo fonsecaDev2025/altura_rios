@@ -34,7 +34,7 @@ function setLoading(on) {
   el.statusPanel.classList.toggle("status--loading", on);
   if (on) {
     el.statusText.textContent = "Obteniendo datos…";
-    el.tableRoot.innerHTML = UI.skeletonRows(8, 6);
+    el.tableRoot.innerHTML = UI.skeletonRows(8, 9);
     coldStart.start();
   } else {
     coldStart.clear();
@@ -80,6 +80,15 @@ function tendenciaFromVariacion(v) {
   return { label: "Estacionario", cls: "estado estado--estac" };
 }
 
+/** Altura anterior ≈ nivel del día − variación diaria (DMH no la publica aparte). */
+function alturaAnteriorFrom(nivel, variacion) {
+  const h = UI.parseNum(nivel);
+  const v = UI.parseNum(variacion);
+  if (h == null || v == null) return "—";
+  const ant = h - v;
+  return Number.isInteger(ant) ? String(ant) : ant.toFixed(2);
+}
+
 function renderTable() {
   const q = (el.filterInput.value || "").trim().toLowerCase();
   const items = lastItems.filter((row) => {
@@ -103,13 +112,15 @@ function renderTable() {
       <caption class="sr-only">Niveles del Río Paraguay (DMH)</caption>
       <thead>
         <tr>
-          <th scope="col">Localidad</th>
-          <th scope="col">Fecha</th>
-          <th scope="col">Nivel del día</th>
+          <th scope="col">Puerto</th>
+          <th scope="col">Río</th>
+          <th scope="col">Altura</th>
           <th scope="col">Variación</th>
           <th scope="col">Tendencia</th>
+          <th scope="col">Umbral</th>
           <th scope="col">Evolución</th>
-          <th scope="col">Detalle</th>
+          <th scope="col">Alt. anterior</th>
+          <th scope="col">Histórico</th>
         </tr>
       </thead>
       <tbody>`;
@@ -117,19 +128,23 @@ function renderTable() {
   const body = items
     .map((row) => {
       const t = tendenciaFromVariacion(row.variacionDiaria);
+      const level = "sin-dato";
       const spark = UI.sparklineSvg(seriesByLoc[row.localidad] || []);
-      const link = row.verMasUrl
-        ? `<a class="link-more" href="${UI.escapeHtml(row.verMasUrl)}" target="_blank" rel="noopener noreferrer">Ver histórico de ${UI.escapeHtml(row.localidad)}</a>`
+      const altAnt = alturaAnteriorFrom(row.nivelDelDia, row.variacionDiaria);
+      const hist = row.verMasUrl
+        ? `<a href="${UI.escapeHtml(row.verMasUrl)}" target="_blank" rel="noopener noreferrer" class="link-hist">Ver histórico de ${UI.escapeHtml(row.localidad)}</a>`
         : "—";
       return `
         <tr>
-          <td data-label="Localidad" class="col-localidad">${UI.escapeHtml(row.localidad)}</td>
-          <td data-label="Fecha" class="num">${UI.escapeHtml(row.fecha)}</td>
-          <td data-label="Nivel" class="num">${UI.escapeHtml(row.nivelDelDia)}</td>
+          <td data-label="Puerto" class="col-puerto">${UI.escapeHtml(row.localidad)}</td>
+          <td data-label="Río">Paraguay</td>
+          <td data-label="Altura" class="num">${UI.escapeHtml(row.nivelDelDia)}</td>
           <td data-label="Variación" class="num">${UI.escapeHtml(row.variacionDiaria)}</td>
           <td data-label="Tendencia"><span class="${t.cls}">${t.label}</span></td>
+          <td data-label="Umbral"><span class="umbral umbral--${level}" title="Sin umbrales (DMH no publica alerta/evacuación)">${UI.umbralLabel(level)}</span></td>
           <td data-label="Evolución">${spark}</td>
-          <td data-label="Detalle">${link}</td>
+          <td data-label="Alt. ant." class="num">${UI.escapeHtml(altAnt)}</td>
+          <td data-label="Histórico">${hist}</td>
         </tr>`;
     })
     .join("");
