@@ -13,16 +13,21 @@ const el = {
   statusText: document.getElementById("status-text"),
   btnRefresh: document.getElementById("btn-refresh"),
   metaSection: document.getElementById("meta-section"),
+  metaSource: document.getElementById("meta-source"),
   metaTime: document.getElementById("meta-time"),
   metaCount: document.getElementById("meta-count"),
   metaDbChip: document.getElementById("meta-db-chip"),
   metaDb: document.getElementById("meta-db"),
   warningsBlock: document.getElementById("warnings-block"),
   warningsList: document.getElementById("warnings-list"),
+  legend: document.getElementById("legend"),
   toolbar: document.getElementById("toolbar"),
   filterInput: document.getElementById("filter-input"),
   tableRoot: document.getElementById("table-root"),
 };
+
+const DMH_SOURCE =
+  "https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php";
 
 let lastItems = [];
 let seriesByLoc = {};
@@ -138,10 +143,12 @@ function renderTable() {
     el.tableRoot.innerHTML =
       '<p class="empty">No hay filas para Río Paraguay.</p>';
     el.toolbar.hidden = true;
+    el.legend.hidden = true;
     return;
   }
 
   el.toolbar.hidden = false;
+  el.legend.hidden = false;
 
   const head = `
     <table class="data-table">
@@ -229,6 +236,7 @@ async function load(forceRefresh = false) {
       );
       el.metaSection.hidden = true;
       el.toolbar.hidden = true;
+      el.legend.hidden = true;
       el.tableRoot.innerHTML = "";
       renderWarnings([]);
       return;
@@ -246,6 +254,9 @@ async function load(forceRefresh = false) {
       el.statusText.textContent = "Datos actualizados correctamente.";
     }
     el.metaSection.hidden = false;
+    const sourceUrl = data.source || DMH_SOURCE;
+    el.metaSource.href = sourceUrl;
+    el.metaSource.textContent = sourceUrl;
     el.metaTime.textContent = formatWhen(data.scrapedAt);
     el.metaCount.textContent = String(data.count ?? 0);
     if (data.dbSaved && data.dbSaved.rowsSaved > 0) {
@@ -266,6 +277,7 @@ async function load(forceRefresh = false) {
     }
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;
+    el.legend.hidden = true;
     el.tableRoot.innerHTML = "";
   } finally {
     setLoading(false);

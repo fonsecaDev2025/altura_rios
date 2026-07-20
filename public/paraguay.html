@@ -64,7 +64,11 @@
 
       <section class="meta meta--grid" id="meta-section" hidden>
         <div class="meta__chip meta__chip--block">
-          <span class="meta__label">Extracción</span>
+          <span class="meta__label">Origen</span>
+          <a class="meta__value meta__link" id="meta-source" href="#" target="_blank" rel="noopener"></a>
+        </div>
+        <div class="meta__chip meta__chip--block">
+          <span class="meta__label">Última extracción</span>
           <span class="meta__value" id="meta-time"></span>
         </div>
         <div class="meta__chip meta__chip--block">
@@ -81,6 +85,13 @@
         <h2 class="warnings__title">Avisos</h2>
         <ul class="warnings__list" id="warnings-list"></ul>
       </section>
+
+      <p class="legend" id="legend" hidden>
+        <span class="legend__item"><span class="umbral umbral--normal">Normal</span></span>
+        <span class="legend__item"><span class="umbral umbral--alerta">Alerta</span></span>
+        <span class="legend__item"><span class="umbral umbral--evacuacion">Evacuación</span></span>
+        <span class="legend__item"><span class="estado estado--baja">Baja</span> / <span class="estado estado--crece">Crece</span></span>
+      </p>
 
       <section class="toolbar" id="toolbar" hidden>
         <label class="sr-only" for="filter-input">Filtrar tabla</label>
