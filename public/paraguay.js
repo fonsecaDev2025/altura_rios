@@ -256,9 +256,9 @@ async function load(forceRefresh = false) {
     el.metaSection.hidden = false;
     const sourceUrl = data.source || DMH_SOURCE;
     el.metaSource.href = sourceUrl;
-    el.metaSource.textContent = sourceUrl;
+    el.metaSource.textContent = "meteorologia.gov.py";
     el.metaTime.textContent = formatWhen(data.scrapedAt);
-    el.metaCount.textContent = String(data.count ?? 0);
+    el.metaCount.textContent = String(data.count ?? data.items?.length ?? 0);
     if (data.dbSaved && data.dbSaved.rowsSaved > 0) {
       el.metaDbChip.hidden = false;
       el.metaDb.textContent = `${data.dbSaved.rowsSaved} filas → data/paraguay_dmh.sqlite`;

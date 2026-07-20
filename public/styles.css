@@ -364,6 +364,13 @@ body {
   margin-bottom: 1rem;
 }
 
+.meta[hidden],
+.legend[hidden],
+.toolbar[hidden],
+.warnings[hidden] {
+  display: none !important;
+}
+
 .meta--grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
