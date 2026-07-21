@@ -11,8 +11,9 @@ El proyecto nace como una herramienta simple para reunir información de la cuen
 - Permite cargar manualmente pasos, profundidades y alturas relevadas durante la navegación.
 - Expone una API REST para consumir los datos en JSON.
 - Muestra la información en un dashboard web responsive.
-- Guarda extracciones locales en SQLite y sirve respuestas desde caché.
-- Permite ejecutar tareas diarias para actualizar datos.
+- Guarda extracciones en SQLite (local/Render) o Turso (Vercel) y sirve respuestas desde caché (API solo-lectura).
+- Sync diario vía Vercel Cron o daemon opcional; scrape manual con `?refresh=1`.
+- PWA ligera para consultar el último snapshot con poca señal.
 
 ## Pasos y profundidades
 
@@ -34,7 +35,8 @@ La aplicación prioriza una arquitectura liviana:
 - Backend con Express.
 - Parsers HTML sin navegador headless.
 - Frontend estático con HTML, CSS y JavaScript.
-- Base de datos local con SQLite.
+- Base de datos SQLite local o Turso en la nube.
+- Rutas Express separadas (`routes/`) y parsers en `lib/`.
 
 Este enfoque permite desplegar y ejecutar el proyecto con pocos recursos, manteniendo el código fácil de revisar y adaptar.
 

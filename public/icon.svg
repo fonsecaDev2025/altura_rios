@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Altura Ríos">
+  <rect width="128" height="128" rx="24" fill="#1e5f8a"/>
+  <path d="M16 88c16-20 28-20 44 0s28 20 44 0 28-20 44 0v24H16V88z" fill="#2d7ab5" opacity="0.9"/>
+  <path d="M16 100c16-16 28-16 44 0s28 16 44 0 28-16 44 0v28H16v-28z" fill="#f4efe6" opacity="0.35"/>
+  <circle cx="64" cy="44" r="14" fill="#f4efe6"/>
+  <path d="M64 30v28M50 44h28" stroke="#1a2332" stroke-width="4" stroke-linecap="round"/>
+</svg>

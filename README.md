@@ -1,167 +1,182 @@
 # Altura Ríos Dashboard
 
-Dashboard web para consultar alturas hidrométricas de ríos, con datos obtenidos desde fuentes públicas de FICH/UNL y DMH Paraguay.
+Dashboard web para consultar alturas hidrométricas de ríos, con datos desde fuentes públicas de FICH/UNL y DMH Paraguay.
 
-El proyecto incluye un servidor Express, una interfaz web estática, parsers livianos basados en HTML y persistencia con SQLite local (dev/Render) o [Turso](https://turso.tech) (Vercel).
+Incluye servidor Express, interfaz estática, parsers HTML livianos y persistencia con SQLite local (dev/Render) o [Turso](https://turso.tech) (Vercel).
+
+**Demo:** [altura-rios.vercel.app](https://altura-rios.vercel.app) · **Repo:** [fonsecaDev2025/altura_rios](https://github.com/fonsecaDev2025/altura_rios)
 
 ## Características
 
-- Dashboard para alturas de la cuenca del Paraná.
-- Vista separada para estaciones convencionales del Río Paraguay publicadas por DMH Paraguay.
-- API REST para consultar datos en formato JSON.
-- Persistencia diaria (SQLite local o Turso en la nube).
-- Scripts para importar históricos y actualizar datos.
-- Despliegue en Vercel (+ Turso) o Render (disco + SQLite).
+- Dashboard de la cuenca del Paraná (umbrales, tendencia, sparklines e histórico por estación).
+- Vista separada para estaciones convencionales del Río Paraguay (DMH).
+- Sección **Pasos y profundidades** con cuentas de usuario (CRUD manual).
+- API REST en JSON (modo **solo-lectura**; scrape vía cron o `?refresh=1`).
+- Persistencia diaria (SQLite o Turso) + recuperación de días faltantes.
+- Despliegue en Vercel (+ Turso + Cron) o Render (disco + SQLite).
+- PWA ligera: shell offline y último snapshot en caché del navegador.
 
 ## Tecnologías
 
-- Node.js 18 o superior
-- Express
-- better-sqlite3 (local) / @libsql/client + Turso (Vercel)
+- Node.js 18+
+- Express, helmet, express-rate-limit
+- better-sqlite3 (local) / `@libsql/client` + Turso (Vercel)
 - HTML, CSS y JavaScript vanilla
-- Python 3 para el daemon diario opcional
+- Python 3 opcional (`croniter_daily.py`, local/Render)
 
 ## Instalación
 
-Cloná el repositorio e instalá las dependencias:
-
 ```bash
-git clone https://github.com/tu-usuario/altura_rios.git
+git clone https://github.com/fonsecaDev2025/altura_rios.git
 cd altura_rios
 npm install
 ```
 
-## Uso local
+Para Turso en local: copiá `.env.example` → `.env` (o `npx vercel env pull .env.local`).
 
-Iniciá el servidor:
+## Uso local
 
 ```bash
 npm start
-```
-
-También podés usar:
-
-```bash
+# o
 npm run dev
 ```
 
-Por defecto la aplicación queda disponible en:
+Por defecto: `http://localhost:3000`. Si el puerto está ocupado, se prueba el siguiente en el rango configurado.
 
-```text
-http://localhost:3000
-```
+## Modelo de datos (importante)
 
-Si el puerto está ocupado, el servidor intenta usar el siguiente puerto disponible dentro del rango configurado.
+La API **no scrapea en cada request**:
 
-## Scripts disponibles
+| Cómo | Qué hace |
+| --- | --- |
+| `GET /api/data` / `GET /api/rio-paraguay-dmh` | Sirve el último snapshot (DB + caché en memoria). |
+| `?refresh=1` | Fuerza scrape de la fuente oficial (rate-limit: 5/min). |
+| `GET /api/cron/sync` | Sync diario Paraná + Paraguay (Vercel Cron, requiere `CRON_SECRET`). |
+| Bootstrap | Si no hay snapshot aún, el primer GET puede scrapear una vez. |
 
-```bash
-npm start
-```
+TTL informativo: `CACHE_TTL_MS` (por defecto **24 h**). El front muestra la edad de los datos; el botón **Actualizar datos** pide confirmación antes de forzar scrape.
 
-Inicia el servidor Express.
+## Scripts
 
-```bash
-npm run build:pages
-```
-
-Genera configuración para Pages.
-
-```bash
-npm run import:historico
-```
-
-Importa datos históricos a una base SQLite local.
-
-```bash
-npm run sync:paraguay
-```
-
-Descarga datos de DMH Paraguay y los guarda en SQLite.
-
-```bash
-npm run recuperar:faltantes
-```
-
-Rellena días faltantes desde históricos (wfich + DMH). Con `TURSO_*` (o tras `npx vercel env pull .env.local`) escribe en Turso; sin Turso usa los SQLite locales.
+| Script | Descripción |
+| --- | --- |
+| `npm start` / `npm run dev` | Servidor Express |
+| `npm test` | Tests (parsers, DB, API) |
+| `npm run lint` | ESLint |
+| `npm run sync:paraguay` | Scrape DMH → SQLite/Turso |
+| `npm run import:historico` | Importa históricos a SQLite local |
+| `npm run recuperar:faltantes` | Rellena días faltantes (wfich + DMH); con `TURSO_*` escribe en Turso |
+| `npm run migrate:turso` | Crea esquema en Turso |
+| `npm run import:turso` | Migra datos locales → Turso |
+| `npm run db:studio` | Explorador simple de la DB |
+| `npm run vercel:dev` | Emula Vercel en local |
+| `npm run build:pages` | Regenera `public/config.js` si usás `API_BASE_URL` en build |
 
 ## API
 
-### Salud del servicio
+### Salud
 
 ```http
 GET /api/health
 ```
 
-Devuelve el estado básico del backend.
+Incluye backend (`turso` / `sqlite-file`), edad de snapshots Paraná/Paraguay y estado del último cron.
 
-### Alturas de la cuenca del Paraná
+### Paraná (solo-lectura)
 
 ```http
 GET /api/data
+GET /api/data?refresh=1
 ```
 
-Obtiene alturas desde FICH/UNL y guarda la última extracción diaria en SQLite.
-
-### Río Paraguay DMH
+### Río Paraguay DMH (solo-lectura)
 
 ```http
 GET /api/rio-paraguay-dmh
+GET /api/rio-paraguay-dmh?refresh=1
 ```
 
-Obtiene estaciones convencionales del Río Paraguay desde DMH Paraguay y guarda la extracción en SQLite.
+### Series (sparklines / gráfico)
+
+```http
+GET /api/series?source=parana&dias=14
+GET /api/series?source=paraguay&dias=30
+```
+
+`source`: `parana` \| `paraguay`. `dias`: 1–90 (default 14).
+
+### Cron (protegido)
+
+```http
+GET /api/cron/sync
+Authorization: Bearer <CRON_SECRET>
+```
+
+### Auth + Pasos
+
+| Método | Ruta | Auth | Descripción |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/register` | — | Registro (rate-limit) |
+| `POST` | `/api/auth/login` | — | Login (cookie `HttpOnly`) |
+| `POST` | `/api/auth/logout` | — | Cierra sesión |
+| `GET` | `/api/auth/me` | cookie | Usuario actual |
+| `GET/POST` | `/api/pasos` | sí | Listar / crear |
+| `PUT/DELETE` | `/api/pasos/:id` | sí | Editar / borrar |
+
+Detalle de dominio: ver [ABOUT.md](./ABOUT.md).
 
 ## Variables de entorno
 
-Copiá `.env.example` a `.env` si usás Turso en local. Sin `TURSO_DATABASE_URL` se usan archivos SQLite en `data/`.
+Copiá `.env.example` a `.env`. Sin `TURSO_DATABASE_URL` se usan archivos en `data/`.
 
-| Variable | Descripción | Valor por defecto |
+| Variable | Descripción | Default |
 | --- | --- | --- |
-| `TURSO_DATABASE_URL` | URL libsql de Turso (requerida en Vercel) | — |
-| `TURSO_AUTH_TOKEN` | Token de Turso | — |
-| `CRON_SECRET` | Bearer para `GET /api/cron/sync` (Vercel Cron) | — |
-| `PORT` | Puerto base del servidor | `3000` |
-| `CORS_ORIGIN` | Orígenes permitidos separados por coma | `*` |
+| `TURSO_DATABASE_URL` | URL libsql (requerida en Vercel) | — |
+| `TURSO_AUTH_TOKEN` | Token Turso | — |
+| `CRON_SECRET` | Bearer para `/api/cron/sync` | — |
+| `CACHE_TTL_MS` | Edad “fresca” del snapshot (ms) | `86400000` (24 h) |
+| `PORT` | Puerto base | `3000` |
+| `CORS_ORIGIN` | Orígenes permitidos (coma) | `*` |
 | `TRUST_PROXY` | `1` detrás de Vercel/CDN | — |
-| `FETCH_TIMEOUT_MS` | Timeout para consultar FICH/UNL | `30000` |
-| `FETCH_RETRIES` | Cantidad de reintentos de fetch | `2` |
-| `SQLITE_PATH` | Ruta SQLite principal (sin Turso) | `data/alturas.sqlite` |
-| `PARAGUAY_SQLITE_PATH` | Ruta SQLite Paraguay (sin Turso) | `data/paraguay_dmh.sqlite` |
-| `PASOS_SQLITE_PATH` | Ruta SQLite pasos (sin Turso) | `data/pasos.sqlite` |
-| `DAILY_COMMAND` | Comando diario usado por `croniter_daily.py` | `npm run sync:paraguay` |
+| `FETCH_TIMEOUT_MS` | Timeout scrape | `30000` |
+| `FETCH_RETRIES` | Reintentos fetch | `2` |
+| `SQLITE_PATH` | SQLite Paraná | `data/alturas.sqlite` |
+| `PARAGUAY_SQLITE_PATH` | SQLite Paraguay | `data/paraguay_dmh.sqlite` |
+| `PASOS_SQLITE_PATH` | SQLite pasos | `data/pasos.sqlite` |
+| `DAILY_COMMAND` | Comando de `croniter_daily.py` | `npm run sync:paraguay` |
 
-## Persistencia local
+### Checklist producción (Vercel)
 
-Las bases SQLite se crean automáticamente dentro de `data/` cuando se ejecutan endpoints o scripts que guardan información.
+- [ ] `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`
+- [ ] `CRON_SECRET` (y Cron en `vercel.json`: `0 11 * * *` UTC)
+- [ ] `TRUST_PROXY=1`
+- [ ] `NODE_ENV=production`
+- [ ] Migración: `npm run migrate:turso` + `npm run import:turso` (una vez)
 
-- `data/alturas.sqlite`: última extracción diaria por puerto.
-- `data/paraguay_dmh.sqlite`: extracciones de estaciones convencionales del Río Paraguay.
-- `data/historico_<id>_<tiempo>.sqlite`: bases generadas por el importador histórico.
+## Persistencia
 
-## Sincronización diaria opcional
+- `data/alturas.sqlite` — extracciones Paraná + snapshots
+- `data/paraguay_dmh.sqlite` — Paraguay DMH
+- `data/pasos.sqlite` — usuarios, sesiones y pasos
+- `data/historico_*.sqlite` — importador histórico
 
-El archivo `croniter_daily.py` ejecuta un comando una vez por día a la hora configurada en el script.
+Con Turso, las mismas tablas viven en la nube.
 
-Ejemplo:
+## Sincronización diaria
+
+**Producción (recomendado):** Vercel Cron → `/api/cron/sync` (11:00 UTC ≈ 08:00 ARG).
 
 ```bash
-python3 croniter_daily.py
+curl -H "Authorization: Bearer $CRON_SECRET" https://altura-rios.vercel.app/api/cron/sync
 ```
 
-Por defecto ejecuta:
+**Opcional local/Render:** `python3 croniter_daily.py` (+ `croniter_daily.service`). Por defecto solo corre `npm run sync:paraguay`.
 
-```bash
-npm run sync:paraguay
-```
+## Despliegue en Vercel
 
-También se incluye `croniter_daily.service` para usarlo como servicio systemd.
-
-## Despliegue en Vercel (recomendado)
-
-Vercel no permite SQLite en disco. La app usa Turso cuando están definidas `TURSO_*`.
-
-1. Creá una base en [Turso](https://turso.tech) y obtené `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`.
-2. Migrá el esquema e importá tus datos locales (una vez):
+1. Creá una base en [Turso](https://turso.tech).
+2. Migrá e importá:
 
 ```bash
 export TURSO_DATABASE_URL=libsql://...
@@ -170,37 +185,22 @@ npm run migrate:turso
 npm run import:turso
 ```
 
-3. En [Vercel](https://vercel.com): Importá el repo `altura_rios` y configurá en Environment Variables:
+3. En Vercel: importá el repo y configurá las variables del checklist.
+4. Deploy (`api/index.js` + `vercel.json`).
+5. Verificá `GET /api/health` (snapshots + `lastCron` tras el primer sync).
 
-| Variable | Valor |
-| --- | --- |
-| `TURSO_DATABASE_URL` | tu URL libsql |
-| `TURSO_AUTH_TOKEN` | tu token |
-| `TRUST_PROXY` | `1` |
-| `NODE_ENV` | `production` |
-
-4. Deploy. La entrada serverless es `api/index.js` (`vercel.json`).
-5. Configurá también `CRON_SECRET`: Vercel llama cada día a `/api/cron/sync` (11:00 UTC) y scrapea Paraná + Paraguay guardando en Turso.
-
-Sync manual:
-
-```bash
-curl -H "Authorization: Bearer $CRON_SECRET" https://altura-rios.vercel.app/api/cron/sync
-```
-
-CLI opcional: `npx vercel` / `npx vercel --prod` (después de `npx vercel login`).
-
-**Importante:** no subas el token al repo. Si lo pegaste en un chat, rotálo en el dashboard de Turso.
+**No subas tokens al repo.** Si se filtraron, rotálos en Turso.
 
 ## Despliegue en Render
 
-El archivo `render.yaml` define un servicio web Node.js y un cron. Con disco en `/var/data` podés seguir usando SQLite (sin Turso).
+`render.yaml` define web + cron. Con disco en `/var/data` podés usar SQLite sin Turso.
 
-## Fuentes de datos
+## Fuentes
 
-- FICH/UNL: alturas de la cuenca del Paraná.
-- DMH Paraguay: estaciones convencionales del Río Paraguay.
+- FICH/UNL — cuenca del Paraná
+- DMH Paraguay — estaciones convencionales del Río Paraguay
 
+<<<<<<< HEAD
 Este proyecto consulta fuentes públicas y puede requerir ajustes si cambia el HTML de los sitios de origen.
 ## Descargo de responsabilidad
 Aviso Legal y Descargo de Responsabilidad
@@ -210,6 +210,13 @@ La presente herramienta (disponible en [https://github.com/fonsecaDev2025/altura
 Esta aplicación funciona únicamente como una ayuda complementaria al navegante. Bajo ninguna circunstancia define, determina ni debe ser utilizada de forma exclusiva para tomar decisiones respecto a la navegación, el franqueo de pasos críticos, el calado seguro o la maniobra de embarcaciones.
 
 El desarrollador no se hace responsable por el uso interno, la interpretación, la exactitud, la disponibilidad o los daños directos e indirectos derivados del uso de esta herramienta. La responsabilidad de la navegación, la seguridad de la embarcación y las decisiones tomadas a bordo recae íntegramente sobre el capitán o mando a cargo.
+=======
+Si cambia el HTML de origen, los parsers pueden necesitar ajuste.
+
+## Descargo de responsabilidad
+
+Herramienta de uso personal e informativo. **No es fuente oficial** ni reemplaza avisos de autoridades marítimas, fluviales o portuarias. No debe usarse de forma exclusiva para decidir navegación, franqueo de pasos críticos, calado o maniobra. La responsabilidad recae en el capitán o mando a cargo.
+>>>>>>> 0a51e00 (Documentar API solo-lectura, modularizar servidor y mejorar UX/ops.)
 
 ## Licencia
 

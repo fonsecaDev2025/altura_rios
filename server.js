@@ -8,7 +8,7 @@
  *  [3] body limit         — previene payloads gigantes
  *  [4] server.timeout     — previene requests colgados
  *  [5] conn limit         — máx conexiones simultáneas
- *  [6] gracefulShutdown   — cierre ordenado de BD y servidor
+ *  [6] gracefulShutdown   — cierre ordenado
  *  [7] BIND_HOST          — bind solo a localhost en dev
  *  [8] static headers     — X-Frame-Options, nosniff, etc.
  */
@@ -16,73 +16,46 @@
 const path = require("path");
 const http = require("http");
 const express = require("express");
-const helmet = require("helmet");                        // [1]
-const rateLimit = require("express-rate-limit");         // [2]
-const {
-  initDb,
-  maintenanceAlturas,
-  maintenanceParaguay,
-  saveUltimaExtraccionDelDia,
-  saveSnapshot,
-  getLatestSnapshot,
-  initDbParaguay,
-  saveParaguayExtraccion,
-  getSeriesAlturas,
-  getSeriesParaguay,
-} = require("./db");
-const {
-  initDbPasos,
-  createUser,
-  authenticate,
-  createSession,
-  getUserBySession,
-  deleteSession,
-  maintenancePasos,
-  listPasos,
-  createPaso,
-  updatePaso,
-  deletePaso,
-  SESSION_TTL_MS,
-} = require("./dbPasos");
-const { parseRioParaguay } = require("./lib/paraguayConvencional");
-const { parseFichAlturas } = require("./lib/fichHtmlParser");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+const { initDb, initDbParaguay, maintenanceAlturas, maintenanceParaguay } = require("./db");
+const { initDbPasos, maintenancePasos } = require("./dbPasos");
+const { wantsRefresh } = require("./lib/snapshots");
+const { apiCacheControl } = require("./lib/apiCacheControl");
 
-const PARAGUAY_DMH_URL =
-  "https://www.meteorologia.gov.py/nivel-rio/indexconvencional.php";
+const dataRoutes = require("./routes/data");
+const cronRoutes = require("./routes/cron");
+const authRoutes = require("./routes/auth");
+const pasosRoutes = require("./routes/pasos");
 
 const app = express();
 
-// ─── Trust proxy (detrás de CDN/Render) ───────────────────────────────────────
-// Necesario para que express-rate-limit lea la IP real (X-Forwarded-For) y para
-// que req.secure/protocolo sean correctos. TRUST_PROXY = nº de saltos de proxy
-// (p. ej. "2" para Cloudflare → Render). En local queda desactivado.
 const TRUST_PROXY = process.env.TRUST_PROXY;
 if (TRUST_PROXY) {
-  app.set("trust proxy", /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY);
+  app.set(
+    "trust proxy",
+    /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY
+  );
 }
 
-// ─── [1] Headers de seguridad HTTP ───────────────────────────────────────────
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: [
-          "'self'",
-          "https://fonts.googleapis.com",
-          "'unsafe-inline'",
-        ],
+        styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         connectSrc: ["'self'"],
         imgSrc: ["'self'", "data:"],
+        workerSrc: ["'self'"],
+        manifestSrc: ["'self'"],
       },
     },
-    crossOriginEmbedderPolicy: false, // no interferir con fetch a APIs públicas
+    crossOriginEmbedderPolicy: false,
   })
 );
 
-// ─── CORS ─────────────────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   const list = (process.env.CORS_ORIGIN || "")
@@ -98,7 +71,10 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
   }
 
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS"
+  );
   res.setHeader("Access-Control-Allow-Headers", "Accept, Content-Type");
   if (req.method === "OPTIONS") {
     return res.status(204).end();
@@ -106,331 +82,40 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── [3] Límite de tamaño de body entrante ───────────────────────────────────
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: false, limit: "10kb" }));
 
-// ─── [2] Rate limiting ────────────────────────────────────────────────────────
-// 60 req / min globales para cualquier ruta /api/*
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { ok: false, error: "Demasiadas peticiones. Reintentá en un minuto." },
+  message: {
+    ok: false,
+    error: "Demasiadas peticiones. Reintentá en un minuto.",
+  },
 });
 app.use("/api/", apiLimiter);
 
-// 5 req / min solo cuando ?refresh=1 (scrape real). Lecturas de caché no cuentan.
 const scrapeLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { ok: false, error: "Límite de actualizaciones por minuto alcanzado." },
+  message: {
+    ok: false,
+    error: "Límite de actualizaciones por minuto alcanzado.",
+  },
   skip: (req) => !wantsRefresh(req),
 });
 app.use("/api/data", scrapeLimiter);
 app.use("/api/rio-paraguay-dmh", scrapeLimiter);
 
-// ─── Cache-Control para CDN / navegador ───────────────────────────────────────
-// Clasifica las rutas /api: públicas cacheables vs. privadas (sesión/cookies).
-// Un CDN (Cloudflare, etc.) respeta estas cabeceras y sirve desde el borde.
-function apiCacheControl(req, res, next) {
-  if (!req.path.startsWith("/api/")) return next();
-
-  // Rutas con sesión/cookies o cron: nunca cachear.
-  if (
-    req.path.startsWith("/api/auth") ||
-    req.path.startsWith("/api/pasos") ||
-    req.path.startsWith("/api/cron")
-  ) {
-    res.setHeader("Cache-Control", "private, no-store");
-    return next();
-  }
-
-  // Endpoints públicos cacheables: solo GET sin refresco forzado.
-  // Datos hidrométricos ~1×/día (cron): CDN puede cachear varios minutos.
-  if (req.path === "/api/data" || req.path === "/api/rio-paraguay-dmh") {
-    if (req.method === "GET" && !wantsRefresh(req)) {
-      res.setHeader(
-        "Cache-Control",
-        "public, s-maxage=300, stale-while-revalidate=3600, stale-if-error=86400"
-      );
-    } else {
-      res.setHeader("Cache-Control", "no-store");
-    }
-    return next();
-  }
-
-  // Resto de /api (health, etc.): no cachear.
-  res.setHeader("Cache-Control", "no-store");
-  next();
-}
 app.use(apiCacheControl);
 
-// ─── Configuración de puertos ─────────────────────────────────────────────────
 const BASE_PORT = Number(process.env.PORT) || 3000;
 const PORT_TRY_LIMIT = 15;
 
-const TARGET_URL = "http://wfich1.unl.edu.ar/cim/rios/parana/alturas";
-const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS) || 30000;
-const FETCH_RETRIES = Math.max(1, Number(process.env.FETCH_RETRIES) || 2);
-
-// ─── Caché de snapshots ───────────────────────────────────────────────────────
-// TTL largo: marca "stale" informativo. La API es solo-lectura; scrape = cron o ?refresh=1.
-const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS) || 24 * 60 * 60 * 1000;
-
-// Caché en memoria: evita leer SQLite/Turso en cada request (proceso largo / warm).
-const memSnapshots = new Map(); // source -> { scrapedAt, payload }
-
-// Single-flight: un scrape en curso por fuente; requests concurrentes comparten la promesa.
-const inFlightSync = new Map(); // source -> Promise
-
-function snapshotAgeMs(scrapedAtIso) {
-  const t = Date.parse(scrapedAtIso);
-  return Number.isNaN(t) ? Infinity : Date.now() - t;
-}
-
-/** Devuelve el snapshot de una fuente desde memoria; si no está, lo carga de SQLite/Turso. */
-async function getCachedSnapshot(source) {
-  let snap = memSnapshots.get(source);
-  if (!snap) {
-    try {
-      snap = await getLatestSnapshot(source);
-    } catch (e) {
-      console.warn(`[cache ${source}] lectura DB falló:`, e.message);
-      snap = null;
-    }
-    if (snap) memSnapshots.set(source, snap);
-  }
-  return snap || null;
-}
-
-/** Actualiza la caché en memoria tras un scrapeo exitoso. */
-function setCachedSnapshot(source, scrapedAt, payload) {
-  memSnapshots.set(source, { scrapedAt, payload });
-}
-
-function wantsRefresh(req) {
-  const v = req.query.refresh;
-  return v === "1" || v === "true";
-}
-
-/** Ejecuta fn una sola vez por source mientras esté en vuelo. */
-function withSingleFlight(source, fn) {
-  const existing = inFlightSync.get(source);
-  if (existing) return existing;
-  const promise = Promise.resolve()
-    .then(fn)
-    .finally(() => {
-      if (inFlightSync.get(source) === promise) inFlightSync.delete(source);
-    });
-  inFlightSync.set(source, promise);
-  return promise;
-}
-
-/** Respuesta JSON desde snapshot en DB/memoria (API solo-lectura). */
-function jsonFromSnapshot(res, snap, extras = {}) {
-  const age = snapshotAgeMs(snap.scrapedAt);
-  return res.json({
-    ok: true,
-    ...(snap.payload || {}),
-    cached: true,
-    cacheAgeMs: age,
-    cacheFresh: age < CACHE_TTL_MS,
-    // stale: true solo si el caller lo indica (p. ej. falló ?refresh=1).
-    ...extras,
-  });
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// ─── Fetch DMH Paraguay ──────────────────────────────────────────────────────
-async function fetchRioParaguayDmh() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    let res;
-    try {
-      res = await fetch(PARAGUAY_DMH_URL, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "es-PY,es;q=0.9",
-        },
-        signal: controller.signal,
-      });
-    } catch (err) {
-      if (err && err.name === "AbortError") {
-        throw new Error(`DMH Paraguay: timeout tras ${FETCH_TIMEOUT_MS} ms`, { cause: err });
-      }
-      throw new Error(`DMH Paraguay: error de red – ${err.message}`, { cause: err });
-    }
-    if (!res.ok) {
-      throw new Error(`DMH Paraguay: HTTP ${res.status}`);
-    }
-
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("text/plain")) {
-      throw new Error(`DMH Paraguay: Content-Type inesperado – ${ct}`);
-    }
-
-    let html;
-    try {
-      html = await res.text();
-    } catch (err) {
-      throw new Error(`DMH Paraguay: error leyendo cuerpo – ${err.message}`, { cause: err });
-    }
-
-    const items = parseRioParaguay(html);
-    const warnings = [];
-    if (!items.length) {
-      warnings.push(
-        "No se encontraron filas para Río Paraguay. ¿Cambió el HTML del sitio DMH?"
-      );
-    }
-    return {
-      source: PARAGUAY_DMH_URL,
-      rio: "Río Paraguay",
-      scrapedAt: new Date().toISOString(),
-      count: items.length,
-      items,
-      warnings,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ─── Fetch FICH/UNL ──────────────────────────────────────────────────────────
-async function fetchAlturasOnce() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(TARGET_URL, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "es-AR,es;q=0.9",
-      },
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`FICH HTTP ${res.status}`);
-
-    // [8] Validar Content-Type
-    const ct = res.headers.get("content-type") || "";
-    if (!ct.includes("text/html") && !ct.includes("text/plain")) {
-      throw new Error(`FICH: Content-Type inesperado – ${ct}`);
-    }
-
-    const html = await res.text();
-    const items = parseFichAlturas(html);
-    if (!items.length) {
-      throw new Error("No se obtuvieron filas. ¿Cambió el HTML de FICH/UNL?");
-    }
-    return {
-      source: TARGET_URL,
-      scrapedAt: new Date().toISOString(),
-      count: items.length,
-      items,
-      warnings: [],
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function fetchAlturas() {
-  let lastError = null;
-  for (let attempt = 1; attempt <= FETCH_RETRIES; attempt += 1) {
-    try {
-      const data = await fetchAlturasOnce();
-      if (attempt > 1) {
-        data.warnings.push(`Recuperado en intento ${attempt}/${FETCH_RETRIES}.`);
-      }
-      return data;
-    } catch (err) {
-      lastError = err;
-      if (attempt < FETCH_RETRIES) {
-        await sleep(2000 * attempt);
-      }
-    }
-  }
-  throw lastError || new Error("No se pudo obtener datos de PNA.");
-}
-
-/** Scrapea Paraná, guarda extracciones + snapshot (Turso o SQLite). */
-async function syncParanaToDb() {
-  const SOURCE = "parana";
-  return withSingleFlight(SOURCE, async () => {
-    const data = await fetchAlturas();
-    let dbSaved = null;
-    if (data.items && data.items.length > 0) {
-      dbSaved = await saveUltimaExtraccionDelDia(data.items, data.scrapedAt);
-    }
-    try {
-      await saveSnapshot(SOURCE, data.scrapedAt, data);
-    } catch (snapErr) {
-      console.warn("[cache parana] guardado falló:", snapErr.message);
-    }
-    setCachedSnapshot(SOURCE, data.scrapedAt, data);
-    return {
-      ok: true,
-      count: (data.items && data.items.length) || 0,
-      scrapedAt: data.scrapedAt,
-      dbSaved,
-      warnings: data.warnings || [],
-    };
-  });
-}
-
-/** Scrapea Paraguay DMH y guarda en DB. */
-async function syncParaguayToDb() {
-  const SOURCE = "paraguay";
-  return withSingleFlight(SOURCE, async () => {
-    const data = await fetchRioParaguayDmh();
-    let dbSaved = null;
-    if (data.items && data.items.length > 0) {
-      dbSaved = await saveParaguayExtraccion(data.items, data.scrapedAt);
-    }
-    try {
-      await saveSnapshot(SOURCE, data.scrapedAt, data);
-    } catch (snapErr) {
-      console.warn("[cache paraguay] guardado falló:", snapErr.message);
-    }
-    setCachedSnapshot(SOURCE, data.scrapedAt, data);
-    return {
-      ok: true,
-      count: (data.items && data.items.length) || 0,
-      scrapedAt: data.scrapedAt,
-      dbSaved,
-      warnings: data.warnings || [],
-    };
-  });
-}
-
-function assertCronAuth(req, res) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    res.status(503).json({ ok: false, error: "CRON_SECRET no configurado" });
-    return false;
-  }
-  const auth = req.headers.authorization || "";
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  const token = bearer || String(req.query.secret || "");
-  if (!token || token !== secret) {
-    res.status(401).json({ ok: false, error: "No autorizado" });
-    return false;
-  }
-  return true;
-}
-
-// ─── [8] Archivos estáticos con headers extra ────────────────────────────────
 app.use(
   express.static(path.join(__dirname, "public"), {
     maxAge: "1h",
@@ -443,7 +128,6 @@ app.use(
   })
 );
 
-// ─── Inicializar DB (SQLite local o Turso) ────────────────────────────────────
 const dbReady = Promise.all([initDb(), initDbParaguay(), initDbPasos()])
   .then(() => {
     console.log(
@@ -463,7 +147,6 @@ app.use(async (_req, _res, next) => {
   next();
 });
 
-// ─── Mantenimiento periódico (solo proceso largo; no en Vercel serverless) ───
 const IS_VERCEL = Boolean(process.env.VERCEL);
 const MAINTENANCE_INTERVAL_MS =
   Number(process.env.MAINTENANCE_INTERVAL_MS) || 30 * 60 * 1000;
@@ -474,7 +157,9 @@ async function runDbMaintenance() {
     await maintenanceParaguay();
     const r = await maintenancePasos();
     if (r && r.sessionsRemoved > 0) {
-      console.log(`[mantenimiento] ${r.sessionsRemoved} sesiones vencidas purgadas.`);
+      console.log(
+        `[mantenimiento] ${r.sessionsRemoved} sesiones vencidas purgadas.`
+      );
     }
   } catch (e) {
     console.warn("[mantenimiento] falló:", e.message);
@@ -488,324 +173,11 @@ if (!IS_VERCEL) {
   maintenanceTimer.unref();
 }
 
-// ─── Rutas API ────────────────────────────────────────────────────────────────
+app.use("/api", dataRoutes);
+app.use("/api/cron", cronRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/pasos", pasosRoutes);
 
-/** Cron Vercel: scrapea fuentes oficiales y persiste en Turso/SQLite. */
-app.get("/api/cron/sync", async (req, res) => {
-  if (!assertCronAuth(req, res)) return;
-  const startedAt = new Date().toISOString();
-  const result = {
-    ok: true,
-    startedAt,
-    backend: process.env.TURSO_DATABASE_URL ? "turso" : "sqlite-file",
-  };
-  const [paranaSettled, paraguaySettled] = await Promise.allSettled([
-    syncParanaToDb(),
-    syncParaguayToDb(),
-  ]);
-  if (paranaSettled.status === "fulfilled") {
-    result.parana = paranaSettled.value;
-  } else {
-    console.error("[/api/cron/sync parana]", paranaSettled.reason);
-    result.parana = {
-      ok: false,
-      error: (paranaSettled.reason && paranaSettled.reason.message) || String(paranaSettled.reason),
-    };
-    result.ok = false;
-  }
-  if (paraguaySettled.status === "fulfilled") {
-    result.paraguay = paraguaySettled.value;
-  } else {
-    console.error("[/api/cron/sync paraguay]", paraguaySettled.reason);
-    result.paraguay = {
-      ok: false,
-      error:
-        (paraguaySettled.reason && paraguaySettled.reason.message) ||
-        String(paraguaySettled.reason),
-    };
-    result.ok = false;
-  }
-  result.finishedAt = new Date().toISOString();
-  res.status(result.ok ? 200 : 502).json(result);
-});
-
-/**
- * API solo-lectura: sirve snapshot de DB.
- * Scrape solo con ?refresh=1 (o cron). Si no hay snapshot, intenta un scrape de bootstrap.
- */
-async function serveSnapshotOrRefresh(req, res, { source, syncFn, logTag }) {
-  if (wantsRefresh(req)) {
-    try {
-      const sync = await syncFn();
-      if (sync.dbSaved && sync.dbSaved.rowsSaved > 0) {
-        console.log(
-          `[${logTag}] ${sync.dbSaved.rowsSaved} filas` +
-            (sync.dbSaved.dbPath ? ` en ${sync.dbSaved.dbPath}` : "")
-        );
-      }
-      const snap = memSnapshots.get(source);
-      const data = (snap && snap.payload) || {};
-      return res.json({
-        ok: true,
-        ...data,
-        dbSaved: sync.dbSaved,
-        cached: false,
-      });
-    } catch (err) {
-      console.error(`[${logTag}] refresh`, err);
-      try {
-        const snap = await getCachedSnapshot(source);
-        if (snap) {
-          const ageMin = Math.round(snapshotAgeMs(snap.scrapedAt) / 60000);
-          const payload = snap.payload || {};
-          const warnings = Array.isArray(payload.warnings)
-            ? payload.warnings.slice()
-            : [];
-          warnings.push(
-            `No se pudo actualizar desde la fuente (${err.message}). Mostrando datos cacheados de hace ~${ageMin} min.`
-          );
-          return jsonFromSnapshot(res, snap, { warnings, stale: true });
-        }
-      } catch (e) {
-        console.warn(`[cache ${source}] fallback falló:`, e.message);
-      }
-      res.setHeader("Cache-Control", "no-store");
-      return res.status(500).json({
-        ok: false,
-        error: err.message || "Error al actualizar datos",
-        scrapedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  const snap = await getCachedSnapshot(source);
-  if (snap) return jsonFromSnapshot(res, snap);
-
-  // Bootstrap: sin snapshot aún (DB vacía) → un scrape.
-  try {
-    const sync = await syncFn();
-    const fresh = memSnapshots.get(source);
-    const data = (fresh && fresh.payload) || {};
-    return res.json({
-      ok: true,
-      ...data,
-      dbSaved: sync.dbSaved,
-      cached: false,
-    });
-  } catch (err) {
-    console.error(`[${logTag}] bootstrap`, err);
-    res.setHeader("Cache-Control", "no-store");
-    return res.status(503).json({
-      ok: false,
-      error:
-        err.message ||
-        "Sin datos en caché. Esperá el cron o usá ?refresh=1.",
-      scrapedAt: new Date().toISOString(),
-    });
-  }
-}
-
-app.get("/api/data", async (req, res) => {
-  await serveSnapshotOrRefresh(req, res, {
-    source: "parana",
-    syncFn: syncParanaToDb,
-    logTag: "/api/data",
-  });
-});
-
-app.get("/api/rio-paraguay-dmh", async (req, res) => {
-  await serveSnapshotOrRefresh(req, res, {
-    source: "paraguay",
-    syncFn: syncParaguayToDb,
-    logTag: "/api/rio-paraguay-dmh",
-  });
-});
-
-// ─── Autenticación por sesión (cookie httpOnly) ───────────────────────────────
-const SESSION_COOKIE = "pasos_session";
-
-/** Parseo mínimo de cookies desde la cabecera (sin dependencias). */
-function parseCookies(req) {
-  const header = req.headers.cookie;
-  const out = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const idx = part.indexOf("=");
-    if (idx === -1) continue;
-    const k = part.slice(0, idx).trim();
-    const v = part.slice(idx + 1).trim();
-    if (k) out[k] = decodeURIComponent(v);
-  }
-  return out;
-}
-
-function setSessionCookie(res, token) {
-  const secure = process.env.NODE_ENV === "production";
-  const maxAge = Math.floor(SESSION_TTL_MS / 1000);
-  const parts = [
-    `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    `Max-Age=${maxAge}`,
-  ];
-  if (secure) parts.push("Secure");
-  res.setHeader("Set-Cookie", parts.join("; "));
-}
-
-function clearSessionCookie(res) {
-  res.setHeader(
-    "Set-Cookie",
-    `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
-  );
-}
-
-/** Middleware: exige sesión válida y deja el usuario en req.user. */
-async function requireAuth(req, res, next) {
-  try {
-    const cookies = parseCookies(req);
-    const user = await getUserBySession(cookies[SESSION_COOKIE]);
-    if (!user) {
-      return res
-        .status(401)
-        .json({ ok: false, error: "Necesitás iniciar sesión." });
-    }
-    req.user = user;
-    next();
-  } catch (err) {
-    console.error("[auth]", err);
-    res.status(500).json({ ok: false, error: "Error de autenticación." });
-  }
-}
-
-app.post("/api/auth/register", async (req, res) => {
-  try {
-    const { username, password } = req.body || {};
-    const user = await createUser(username, password);
-    const { token } = await createSession(user.id);
-    setSessionCookie(res, token);
-    res.status(201).json({ ok: true, user: { username: user.username } });
-  } catch (err) {
-    res.status(400).json({ ok: false, error: err.message || "No se pudo registrar." });
-  }
-});
-
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { username, password } = req.body || {};
-    const user = await authenticate(username, password);
-    if (!user) {
-      return res
-        .status(401)
-        .json({ ok: false, error: "Usuario o contraseña incorrectos." });
-    }
-    const { token } = await createSession(user.id);
-    setSessionCookie(res, token);
-    res.json({ ok: true, user: { username: user.username } });
-  } catch (err) {
-    console.error("[login]", err);
-    res.status(500).json({ ok: false, error: "Error al iniciar sesión." });
-  }
-});
-
-app.post("/api/auth/logout", async (req, res) => {
-  try {
-    const cookies = parseCookies(req);
-    await deleteSession(cookies[SESSION_COOKIE]);
-  } catch (err) {
-    console.warn("[logout]", err.message);
-  }
-  clearSessionCookie(res);
-  res.json({ ok: true });
-});
-
-app.get("/api/auth/me", async (req, res) => {
-  const cookies = parseCookies(req);
-  const user = await getUserBySession(cookies[SESSION_COOKIE]);
-  if (!user) return res.status(401).json({ ok: false });
-  res.json({ ok: true, user: { username: user.username } });
-});
-
-// ─── CRUD: pasos / profundidades / alturas (por usuario autenticado) ──────────
-app.get("/api/pasos", requireAuth, async (req, res) => {
-  try {
-    const items = await listPasos(req.user.id);
-    res.json({ ok: true, count: items.length, items });
-  } catch (err) {
-    console.error("[GET /api/pasos]", err);
-    res.status(500).json({ ok: false, error: err.message || "Error al listar pasos" });
-  }
-});
-
-app.post("/api/pasos", requireAuth, async (req, res) => {
-  try {
-    const item = await createPaso(req.user.id, req.body);
-    res.status(201).json({ ok: true, item });
-  } catch (err) {
-    console.error("[POST /api/pasos]", err);
-    res.status(400).json({ ok: false, error: err.message || "No se pudo crear el registro" });
-  }
-});
-
-app.put("/api/pasos/:id", requireAuth, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
-    return res.status(400).json({ ok: false, error: "ID inválido." });
-  }
-  try {
-    const item = await updatePaso(id, req.user.id, req.body);
-    if (!item) {
-      return res.status(404).json({ ok: false, error: "Registro no encontrado." });
-    }
-    res.json({ ok: true, item });
-  } catch (err) {
-    console.error("[PUT /api/pasos]", err);
-    res.status(400).json({ ok: false, error: err.message || "No se pudo actualizar el registro" });
-  }
-});
-
-app.delete("/api/pasos/:id", requireAuth, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
-    return res.status(400).json({ ok: false, error: "ID inválido." });
-  }
-  try {
-    const ok = await deletePaso(id, req.user.id);
-    if (!ok) {
-      return res.status(404).json({ ok: false, error: "Registro no encontrado." });
-    }
-    res.json({ ok: true, id });
-  } catch (err) {
-    console.error("[DELETE /api/pasos]", err);
-    res.status(500).json({ ok: false, error: err.message || "No se pudo eliminar el registro" });
-  }
-});
-
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "altura-rios-dashboard" });
-});
-
-/** Series temporales (sparklines): ?source=parana|paraguay&dias=14 */
-app.get("/api/series", async (req, res) => {
-  try {
-    const source = String(req.query.source || "parana").toLowerCase();
-    const dias = Math.max(1, Math.min(90, Number(req.query.dias) || 14));
-    const series =
-      source === "paraguay"
-        ? await getSeriesParaguay(dias)
-        : await getSeriesAlturas(dias);
-    res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=120");
-    res.json({ ok: true, source, dias, series });
-  } catch (err) {
-    console.error("[/api/series]", err);
-    res.status(500).json({
-      ok: false,
-      error: err.message || "No se pudieron leer las series",
-    });
-  }
-});
-
-// ─── Export app (Vercel serverless) / listen local ───────────────────────────
 module.exports = app;
 
 const IS_SERVERLESS = Boolean(process.env.VERCEL);
@@ -813,12 +185,10 @@ const IS_SERVERLESS = Boolean(process.env.VERCEL);
 if (!IS_SERVERLESS) {
   const server = http.createServer(app);
 
-  // ─── [4] Timeouts de servidor ────────────────────────────────────────────────
   server.timeout = 35_000;
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
 
-  // ─── [5] Límite de conexiones simultáneas ────────────────────────────────────
   const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS) || 200;
   let connectionCount = 0;
 
@@ -893,7 +263,9 @@ if (!IS_SERVERLESS) {
       console.log(`Servidor en http://${BIND_HOST}:${p}`);
       console.log(`API datos: http://${BIND_HOST}:${p}/api/data`);
       console.log(`Río Paraguay (DMH): http://${BIND_HOST}:${p}/paraguay.html`);
-      console.log(`Conexiones máx: ${MAX_CONNECTIONS} | Timeout: ${server.timeout / 1000}s`);
+      console.log(
+        `Conexiones máx: ${MAX_CONNECTIONS} | Timeout: ${server.timeout / 1000}s`
+      );
     });
   }
 

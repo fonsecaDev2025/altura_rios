@@ -1,0 +1,18 @@
+{
+  "name": "Altura Ríos",
+  "short_name": "Altura Ríos",
+  "description": "Alturas hidrométricas Paraná y Paraguay",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4efe6",
+  "theme_color": "#1e5f8a",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

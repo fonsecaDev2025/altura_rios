@@ -335,6 +335,10 @@ body {
 }
 
 .status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
   margin-bottom: 1rem;
   padding: 0.85rem 1rem;
   border-radius: var(--radius);
@@ -355,6 +359,107 @@ body {
 .status__text {
   margin: 0;
   font-size: 0.95rem;
+  flex: 1 1 12rem;
+}
+
+.status__badge {
+  flex: 0 0 auto;
+}
+
+.age-badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--sand-dark);
+  background: var(--sand);
+  color: var(--ink);
+}
+
+.age-badge--live {
+  border-color: var(--water);
+  color: var(--water);
+  background: rgba(30, 95, 138, 0.08);
+}
+
+.age-badge--fresh {
+  border-color: #2a7a4b;
+  color: #1e5c38;
+  background: rgba(42, 122, 75, 0.1);
+}
+
+.age-badge--stale {
+  border-color: #b24e1e;
+  color: #8a3a14;
+  background: rgba(178, 78, 30, 0.1);
+}
+
+.sparkline-btn {
+  display: inline-flex;
+  cursor: pointer;
+  color: var(--water);
+  border-radius: 4px;
+}
+
+.sparkline-btn:hover,
+.sparkline-btn:focus-visible {
+  outline: 2px solid var(--water-light);
+  outline-offset: 2px;
+}
+
+.chart-modal {
+  border: none;
+  border-radius: 14px;
+  padding: 0;
+  max-width: min(640px, calc(100vw - 2rem));
+  width: 100%;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgba(26, 35, 50, 0.22);
+}
+
+.chart-modal::backdrop {
+  background: rgba(26, 35, 50, 0.45);
+}
+
+.chart-modal__inner {
+  padding: 1.1rem 1.25rem 1.35rem;
+}
+
+.chart-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.chart-modal__title {
+  margin: 0;
+  font-family: Fraunces, Georgia, serif;
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--water);
+}
+
+.chart-svg {
+  color: var(--water);
+  display: block;
+}
+
+.chart-label {
+  font-size: 11px;
+  fill: currentColor;
+  opacity: 0.7;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.chart-empty {
+  margin: 0.5rem 0;
+  color: var(--muted);
 }
 
 .meta {
@@ -841,6 +946,10 @@ body {
 }
 
 .footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  align-items: flex-start;
   padding: 1.25rem clamp(1rem, 4vw, 3rem);
   border-top: 1px solid var(--sand-dark);
   font-size: 0.85rem;
@@ -861,6 +970,13 @@ body {
   background: rgba(30, 95, 138, 0.08);
   padding: 0.15rem 0.35rem;
   border-radius: 4px;
+}
+
+.footer__disclaimer {
+  margin: 0;
+  max-width: 42rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
 }
 
 /* Cards en móvil */

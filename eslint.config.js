@@ -39,12 +39,30 @@ module.exports = [
         HTMLElement: "readonly",
         Event: "readonly",
         location: "readonly",
+        navigator: "readonly",
         resolveApiUrl: "readonly",
         formatApiHttpError: "readonly",
+        UI: "readonly",
       },
     },
   },
   {
-    ignores: ["node_modules/", "data/", "package-lock.json"],
+    files: ["public/sw.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        self: "readonly",
+        caches: "readonly",
+        clients: "readonly",
+        Response: "readonly",
+        Request: "readonly",
+        URL: "readonly",
+        fetch: "readonly",
+        console: "readonly",
+      },
+    },
+  },
+  {
+    ignores: ["node_modules/", "data/", "package-lock.json", "test/_tmp_*/"],
   },
 ];

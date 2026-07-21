@@ -3,14 +3,13 @@
  */
 
 function apiDataUrl(forceRefresh = false) {
-  const base = UI.apiUrl("/api/data");
-  if (!forceRefresh) return base;
-  return base + (base.includes("?") ? "&" : "?") + "refresh=1";
+  return UI.withRefreshParam(UI.apiUrl("/api/data"), forceRefresh);
 }
 
 const el = {
   statusPanel: document.getElementById("status-panel"),
   statusText: document.getElementById("status-text"),
+  ageBadge: document.getElementById("age-badge"),
   btnRefresh: document.getElementById("btn-refresh"),
   metaSection: document.getElementById("meta-section"),
   metaSource: document.getElementById("meta-source"),
@@ -36,6 +35,7 @@ function setLoading(loading) {
   el.statusPanel.classList.toggle("status--loading", loading);
   if (loading) {
     el.statusText.textContent = "Obteniendo datos…";
+    if (el.ageBadge) el.ageBadge.innerHTML = "";
     el.tableSection.innerHTML = UI.skeletonRows(8, 9);
     coldStart.start();
   } else {
@@ -46,6 +46,7 @@ function setLoading(loading) {
 function setError(message) {
   el.statusPanel.classList.add("status--error");
   el.statusText.textContent = message;
+  if (el.ageBadge) el.ageBadge.innerHTML = "";
 }
 
 function clearErrorState() {
@@ -137,7 +138,7 @@ function renderTable({ updateChips = false } = {}) {
 
   const head = `
     <table class="data-table">
-      <caption class="sr-only">Alturas hidrométricas de la cuenca del Paraná</caption>
+      <caption class="sr-only">Alturas hidrométricas de la cuenca del Paraná (orden aproximado río abajo según fuente)</caption>
       <thead>
         <tr>
           <th scope="col">Puerto</th>
@@ -163,7 +164,9 @@ function renderTable({ updateChips = false } = {}) {
       ]
         .filter(Boolean)
         .join(" · ");
-      const spark = UI.sparklineSvg(seriesByPuerto[row.puerto] || []);
+      const spark = UI.sparklineSvg(seriesByPuerto[row.puerto] || [], {
+        stationKey: row.puerto,
+      });
       const hist = row.historicoHref
         ? `<a href="${UI.escapeHtml(row.historicoHref)}" target="_blank" rel="noopener" class="link-hist">Ver histórico de ${UI.escapeHtml(row.puerto)}</a>`
         : "—";
@@ -193,7 +196,7 @@ function renderTable({ updateChips = false } = {}) {
 async function fetchSeries() {
   try {
     const res = await UI.fetchWithTimeout(
-      UI.apiUrl("/api/series?source=parana&dias=14"),
+      UI.apiUrl("/api/series?source=parana&dias=30"),
       {},
       20000
     );
@@ -235,29 +238,16 @@ async function fetchData(forceRefresh = false) {
       return;
     }
 
-    if (data.cached) {
-      const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
-      const sourceFail =
-        data.stale ||
-        (Array.isArray(data.warnings) &&
-          data.warnings.some((w) => /No se pudo actualizar/.test(String(w))));
-      el.statusText.textContent = sourceFail
-        ? `Fuente no disponible. Mostrando datos en caché (hace ~${mins} min).`
-        : `Datos en caché (hace ~${mins} min). Tocá «Actualizar» para refrescar.`;
-    } else {
-      el.statusText.textContent = "Datos actualizados correctamente.";
-    }
+    const cacheInfo = UI.describeCachePayload(data);
+    el.statusText.textContent = cacheInfo.statusText;
+    if (el.ageBadge) el.ageBadge.innerHTML = cacheInfo.badgeHtml;
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderMeta(data);
     renderWarnings(data.warnings);
     renderTable({ updateChips: true });
   } catch (err) {
     console.error(err);
-    if (err.name === "AbortError") {
-      setError("Tiempo de espera agotado. El servidor puede estar despertando; volvé a intentar.");
-    } else {
-      setError("No se pudo conectar al servidor. Si está en Render, puede tardar ~30–60 s al despertar.");
-    }
+    setError(UI.connectionErrorMessage(err));
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;
     el.legend.hidden = true;
@@ -268,7 +258,10 @@ async function fetchData(forceRefresh = false) {
   }
 }
 
-el.btnRefresh.addEventListener("click", () => fetchData(true));
+el.btnRefresh.addEventListener("click", () => {
+  if (!UI.confirmForceRefresh()) return;
+  fetchData(true);
+});
 el.filterInput.addEventListener(
   "input",
   UI.debounce(() => renderTable(), 180)
@@ -278,6 +271,22 @@ el.rioFilters.addEventListener("click", (e) => {
   if (!btn) return;
   activeRio = btn.getAttribute("data-rio") || "";
   renderTable({ updateChips: true });
+});
+
+// Clicks en sparklines: series actualizadas
+el.tableSection.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-station]");
+  if (!btn) return;
+  const key = btn.getAttribute("data-station");
+  UI.openStationChart(key, seriesByPuerto[key] || []);
+});
+el.tableSection.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const btn = e.target.closest("[data-station]");
+  if (!btn) return;
+  e.preventDefault();
+  const key = btn.getAttribute("data-station");
+  UI.openStationChart(key, seriesByPuerto[key] || []);
 });
 
 document.addEventListener("DOMContentLoaded", () => {

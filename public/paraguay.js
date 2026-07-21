@@ -3,14 +3,13 @@
  */
 
 function apiParaguayUrl(forceRefresh = false) {
-  const base = UI.apiUrl("/api/rio-paraguay-dmh");
-  if (!forceRefresh) return base;
-  return base + (base.includes("?") ? "&" : "?") + "refresh=1";
+  return UI.withRefreshParam(UI.apiUrl("/api/rio-paraguay-dmh"), forceRefresh);
 }
 
 const el = {
   statusPanel: document.getElementById("status-panel"),
   statusText: document.getElementById("status-text"),
+  ageBadge: document.getElementById("age-badge"),
   btnRefresh: document.getElementById("btn-refresh"),
   metaSection: document.getElementById("meta-section"),
   metaSource: document.getElementById("meta-source"),
@@ -39,6 +38,7 @@ function setLoading(on) {
   el.statusPanel.classList.toggle("status--loading", on);
   if (on) {
     el.statusText.textContent = "Obteniendo datos…";
+    if (el.ageBadge) el.ageBadge.innerHTML = "";
     el.tableRoot.innerHTML = UI.skeletonRows(8, 9);
     coldStart.start();
   } else {
@@ -49,6 +49,7 @@ function setLoading(on) {
 function setError(msg) {
   el.statusPanel.classList.add("status--error");
   el.statusText.textContent = msg;
+  if (el.ageBadge) el.ageBadge.innerHTML = "";
 }
 
 function clearError() {
@@ -152,7 +153,7 @@ function renderTable() {
 
   const head = `
     <table class="data-table">
-      <caption class="sr-only">Niveles del Río Paraguay (DMH)</caption>
+      <caption class="sr-only">Niveles del Río Paraguay (DMH), orden según fuente oficial</caption>
       <thead>
         <tr>
           <th scope="col">Puerto</th>
@@ -172,7 +173,9 @@ function renderTable() {
     .map((row) => {
       const t = tendenciaFromVariacion(row.variacionDiaria);
       const level = "sin-dato";
-      const spark = UI.sparklineSvg(seriesByLoc[row.localidad] || []);
+      const spark = UI.sparklineSvg(seriesByLoc[row.localidad] || [], {
+        stationKey: row.localidad,
+      });
       const altAnt = alturaAnteriorFor(row);
       const hist = row.verMasUrl
         ? `<a href="${UI.escapeHtml(row.verMasUrl)}" target="_blank" rel="noopener noreferrer" class="link-hist">Ver histórico de ${UI.escapeHtml(row.localidad)}</a>`
@@ -203,7 +206,7 @@ function renderTable() {
 async function fetchSeries() {
   try {
     const res = await UI.fetchWithTimeout(
-      UI.apiUrl("/api/series?source=paraguay&dias=14"),
+      UI.apiUrl("/api/series?source=paraguay&dias=30"),
       {},
       20000
     );
@@ -241,18 +244,9 @@ async function load(forceRefresh = false) {
       renderWarnings([]);
       return;
     }
-    if (data.cached) {
-      const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
-      const sourceFail =
-        data.stale ||
-        (Array.isArray(data.warnings) &&
-          data.warnings.some((w) => /No se pudo actualizar/.test(String(w))));
-      el.statusText.textContent = sourceFail
-        ? `Fuente no disponible. Mostrando datos en caché (hace ~${mins} min).`
-        : `Datos en caché (hace ~${mins} min). Tocá «Actualizar» para refrescar.`;
-    } else {
-      el.statusText.textContent = "Datos actualizados correctamente.";
-    }
+    const cacheInfo = UI.describeCachePayload(data);
+    el.statusText.textContent = cacheInfo.statusText;
+    if (el.ageBadge) el.ageBadge.innerHTML = cacheInfo.badgeHtml;
     el.metaSection.hidden = false;
     const sourceUrl = data.source || DMH_SOURCE;
     el.metaSource.href = sourceUrl;
@@ -261,8 +255,8 @@ async function load(forceRefresh = false) {
     el.metaCount.textContent = String(data.count ?? data.items?.length ?? 0);
     if (data.dbSaved && data.dbSaved.rowsSaved > 0) {
       el.metaDbChip.hidden = false;
-      el.metaDb.textContent = `${data.dbSaved.rowsSaved} filas → data/paraguay_dmh.sqlite`;
-    } else {
+      el.metaDb.textContent = `${data.dbSaved.rowsSaved} filas guardadas`;
+    } else if (el.metaDbChip) {
       el.metaDbChip.hidden = true;
     }
     lastItems = Array.isArray(data.items) ? data.items : [];
@@ -270,11 +264,7 @@ async function load(forceRefresh = false) {
     renderTable();
   } catch (e) {
     console.error(e);
-    if (e.name === "AbortError") {
-      setError("Tiempo de espera agotado. El servidor puede estar despertando; volvé a intentar.");
-    } else {
-      setError("No se pudo conectar al servidor. Si está en Render, puede tardar ~30–60 s al despertar.");
-    }
+    setError(UI.connectionErrorMessage(e));
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;
     el.legend.hidden = true;
@@ -284,9 +274,28 @@ async function load(forceRefresh = false) {
   }
 }
 
-el.btnRefresh.addEventListener("click", () => load(true));
+el.btnRefresh.addEventListener("click", () => {
+  if (!UI.confirmForceRefresh()) return;
+  load(true);
+});
 el.filterInput.addEventListener(
   "input",
   UI.debounce(() => renderTable(), 180)
 );
+
+el.tableRoot.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-station]");
+  if (!btn) return;
+  const key = btn.getAttribute("data-station");
+  UI.openStationChart(key, seriesByLoc[key] || []);
+});
+el.tableRoot.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const btn = e.target.closest("[data-station]");
+  if (!btn) return;
+  e.preventDefault();
+  const key = btn.getAttribute("data-station");
+  UI.openStationChart(key, seriesByLoc[key] || []);
+});
+
 document.addEventListener("DOMContentLoaded", () => load(false));

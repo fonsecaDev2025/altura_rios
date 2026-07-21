@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Altura del Río Paraguay</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1e5f8a" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -60,6 +63,7 @@
     <main class="main">
       <section class="status" id="status-panel" aria-live="polite">
         <p class="status__text" id="status-text">Cargando…</p>
+        <div class="status__badge" id="age-badge"></div>
       </section>
 
       <section class="meta meta--grid" id="meta-section" hidden>
@@ -124,6 +128,10 @@
           >GitHub</a
         ></span
       >
+      <p class="footer__disclaimer">
+        Uso informativo. No es fuente oficial ni reemplaza avisos de autoridades
+        fluviales o portuarias. La navegación es responsabilidad del mando a cargo.
+      </p>
     </footer>
 
     <script src="config.js"></script>
@@ -131,5 +139,6 @@
     <script src="ui.js"></script>
     <script src="nav.js"></script>
     <script src="paraguay.js"></script>
+    <script src="sw-register.js"></script>
   </body>
 </html>
