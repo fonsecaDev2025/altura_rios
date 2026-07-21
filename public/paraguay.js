@@ -253,9 +253,17 @@ async function load(forceRefresh = false) {
     el.metaSource.textContent = "meteorologia.gov.py";
     el.metaTime.textContent = formatWhen(data.scrapedAt);
     el.metaCount.textContent = String(data.count ?? data.items?.length ?? 0);
-    if (data.dbSaved && data.dbSaved.rowsSaved > 0) {
+    // Chip SQLite solo en local; en producción (Turso/Vercel) no aporta y confunde.
+    const isLocal =
+      location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    if (
+      isLocal &&
+      el.metaDbChip &&
+      data.dbSaved &&
+      data.dbSaved.rowsSaved > 0
+    ) {
       el.metaDbChip.hidden = false;
-      el.metaDb.textContent = `${data.dbSaved.rowsSaved} filas guardadas`;
+      el.metaDb.textContent = `${data.dbSaved.rowsSaved} filas → data/paraguay_dmh.sqlite`;
     } else if (el.metaDbChip) {
       el.metaDbChip.hidden = true;
     }
