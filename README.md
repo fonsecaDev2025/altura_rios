@@ -202,6 +202,14 @@ El archivo `render.yaml` define un servicio web Node.js y un cron. Con disco en 
 - DMH Paraguay: estaciones convencionales del Río Paraguay.
 
 Este proyecto consulta fuentes públicas y puede requerir ajustes si cambia el HTML de los sitios de origen.
+## Descargo de responsabilidad
+Aviso Legal y Descargo de Responsabilidad
+
+La presente herramienta (disponible en [https://github.com/fonsecaDev2025/altura_rios](https://github.com/fonsecaDev2025/altura_rios)) ha sido desarrollada exclusivamente para uso personal e informativo. No constituye una fuente oficial de datos ni reemplaza la información, publicaciones o avisos oficiales emitidos por las autoridades marítimas, fluviales o portuarias correspondientes.
+
+Esta aplicación funciona únicamente como una ayuda complementaria al navegante. Bajo ninguna circunstancia define, determina ni debe ser utilizada de forma exclusiva para tomar decisiones respecto a la navegación, el franqueo de pasos críticos, el calado seguro o la maniobra de embarcaciones.
+
+El desarrollador no se hace responsable por el uso interno, la interpretación, la exactitud, la disponibilidad o los daños directos e indirectos derivados del uso de esta herramienta. La responsabilidad de la navegación, la seguridad de la embarcación y las decisiones tomadas a bordo recae íntegramente sobre el capitán o mando a cargo.
 
 ## Licencia
 
