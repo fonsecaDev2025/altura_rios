@@ -1,23 +1,16 @@
 /**
  * Service Worker: shell offline + network-first para /api públicas.
  */
-const CACHE_SHELL = "altura-rios-shell-v2";
-const CACHE_API = "altura-rios-api-v2";
+const CACHE_SHELL = "altura-rios-shell-v3";
+const CACHE_API = "altura-rios-api-v3";
+// No precachear HTML: siempre red para evitar páginas/JS desfasados tras deploy.
 const SHELL = [
-  "/",
-  "/index.html",
-  "/paraguay.html",
-  "/pasos.html",
   "/styles.css",
   "/ui.js",
   "/nav.js",
   "/fonts.js",
   "/config.js",
   "/api-resolve.js",
-  "/script.js",
-  "/paraguay.js",
-  "/pasos.js",
-  "/sw-register.js",
   "/manifest.webmanifest",
   "/icon.svg",
 ];
