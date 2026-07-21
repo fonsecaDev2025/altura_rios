@@ -217,12 +217,6 @@
     };
   }
 
-  function confirmForceRefresh() {
-    return window.confirm(
-      "¿Forzar actualización desde la fuente oficial?\n\nEsto scrapea el sitio de origen (puede tardar). El sync diario ya mantiene los datos al día."
-    );
-  }
-
   function connectionErrorMessage(err) {
     if (err && err.name === "AbortError") {
       return "Tiempo de espera agotado. Volvé a intentar en unos segundos.";
@@ -304,7 +298,6 @@
     withRefreshParam,
     formatAgeLabel,
     describeCachePayload,
-    confirmForceRefresh,
     connectionErrorMessage,
     debounce,
     openStationChart,

@@ -274,15 +274,7 @@ async function fetchData(forceRefresh = false) {
   }
 }
 
-el.btnRefresh.addEventListener("click", () => {
-  if (
-    typeof UI.confirmForceRefresh === "function" &&
-    !UI.confirmForceRefresh()
-  ) {
-    return;
-  }
-  fetchData(true);
-});
+el.btnRefresh.addEventListener("click", () => fetchData(true));
 el.filterInput.addEventListener(
   "input",
   UI.debounce(() => renderTable(), 180)
