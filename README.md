@@ -55,7 +55,7 @@ La API **no scrapea en cada request**:
 | `GET /api/cron/sync` | Sync diario Paraná + Paraguay (Vercel Cron, requiere `CRON_SECRET`). |
 | Bootstrap | Si no hay snapshot aún, el primer GET puede scrapear una vez. |
 
-TTL informativo: `CACHE_TTL_MS` (por defecto **24 h**). El front muestra la edad de los datos; el botón **Actualizar datos** pide confirmación antes de forzar scrape.
+TTL informativo: `CACHE_TTL_MS` (por defecto **24 h**). El front muestra la edad de los datos; el botón **Actualizar datos** fuerza scrape al instante.
 
 ## Scripts
 
