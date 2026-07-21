@@ -200,9 +200,10 @@ npm run import:turso
 - FICH/UNL — cuenca del Paraná
 - DMH Paraguay — estaciones convencionales del Río Paraguay
 
-<<<<<<< HEAD
-Este proyecto consulta fuentes públicas y puede requerir ajustes si cambia el HTML de los sitios de origen.
+Si cambia el HTML de origen, los parsers pueden necesitar ajuste.
+
 ## Descargo de responsabilidad
+
 Aviso Legal y Descargo de Responsabilidad
 
 La presente herramienta (disponible en [https://github.com/fonsecaDev2025/altura_rios](https://github.com/fonsecaDev2025/altura_rios)) ha sido desarrollada exclusivamente para uso personal e informativo. No constituye una fuente oficial de datos ni reemplaza la información, publicaciones o avisos oficiales emitidos por las autoridades marítimas, fluviales o portuarias correspondientes.
@@ -210,13 +211,6 @@ La presente herramienta (disponible en [https://github.com/fonsecaDev2025/altura
 Esta aplicación funciona únicamente como una ayuda complementaria al navegante. Bajo ninguna circunstancia define, determina ni debe ser utilizada de forma exclusiva para tomar decisiones respecto a la navegación, el franqueo de pasos críticos, el calado seguro o la maniobra de embarcaciones.
 
 El desarrollador no se hace responsable por el uso interno, la interpretación, la exactitud, la disponibilidad o los daños directos e indirectos derivados del uso de esta herramienta. La responsabilidad de la navegación, la seguridad de la embarcación y las decisiones tomadas a bordo recae íntegramente sobre el capitán o mando a cargo.
-=======
-Si cambia el HTML de origen, los parsers pueden necesitar ajuste.
-
-## Descargo de responsabilidad
-
-Herramienta de uso personal e informativo. **No es fuente oficial** ni reemplaza avisos de autoridades marítimas, fluviales o portuarias. No debe usarse de forma exclusiva para decidir navegación, franqueo de pasos críticos, calado o maniobra. La responsabilidad recae en el capitán o mando a cargo.
->>>>>>> 0a51e00 (Documentar API solo-lectura, modularizar servidor y mejorar UX/ops.)
 
 ## Licencia
 
