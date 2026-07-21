@@ -3,7 +3,12 @@
  */
 
 function apiDataUrl(forceRefresh = false) {
-  return UI.withRefreshParam(UI.apiUrl("/api/data"), forceRefresh);
+  const base = UI.apiUrl("/api/data");
+  if (typeof UI.withRefreshParam === "function") {
+    return UI.withRefreshParam(base, forceRefresh);
+  }
+  if (!forceRefresh) return base;
+  return base + (base.includes("?") ? "&" : "?") + "refresh=1";
 }
 
 const el = {
@@ -238,16 +243,27 @@ async function fetchData(forceRefresh = false) {
       return;
     }
 
-    const cacheInfo = UI.describeCachePayload(data);
-    el.statusText.textContent = cacheInfo.statusText;
-    if (el.ageBadge) el.ageBadge.innerHTML = cacheInfo.badgeHtml;
+    if (typeof UI.describeCachePayload === "function") {
+      const cacheInfo = UI.describeCachePayload(data);
+      el.statusText.textContent = cacheInfo.statusText;
+      if (el.ageBadge) el.ageBadge.innerHTML = cacheInfo.badgeHtml;
+    } else if (data.cached) {
+      const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
+      el.statusText.textContent = `Datos en caché (hace ~${mins} min).`;
+    } else {
+      el.statusText.textContent = "Datos actualizados correctamente.";
+    }
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderMeta(data);
     renderWarnings(data.warnings);
     renderTable({ updateChips: true });
   } catch (err) {
     console.error(err);
-    setError(UI.connectionErrorMessage(err));
+    setError(
+      typeof UI.connectionErrorMessage === "function"
+        ? UI.connectionErrorMessage(err)
+        : "No se pudo conectar al servidor."
+    );
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;
     el.legend.hidden = true;
@@ -259,7 +275,12 @@ async function fetchData(forceRefresh = false) {
 }
 
 el.btnRefresh.addEventListener("click", () => {
-  if (!UI.confirmForceRefresh()) return;
+  if (
+    typeof UI.confirmForceRefresh === "function" &&
+    !UI.confirmForceRefresh()
+  ) {
+    return;
+  }
   fetchData(true);
 });
 el.filterInput.addEventListener(

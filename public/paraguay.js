@@ -3,7 +3,12 @@
  */
 
 function apiParaguayUrl(forceRefresh = false) {
-  return UI.withRefreshParam(UI.apiUrl("/api/rio-paraguay-dmh"), forceRefresh);
+  const base = UI.apiUrl("/api/rio-paraguay-dmh");
+  if (typeof UI.withRefreshParam === "function") {
+    return UI.withRefreshParam(base, forceRefresh);
+  }
+  if (!forceRefresh) return base;
+  return base + (base.includes("?") ? "&" : "?") + "refresh=1";
 }
 
 const el = {
@@ -15,8 +20,6 @@ const el = {
   metaSource: document.getElementById("meta-source"),
   metaTime: document.getElementById("meta-time"),
   metaCount: document.getElementById("meta-count"),
-  metaDbChip: document.getElementById("meta-db-chip"),
-  metaDb: document.getElementById("meta-db"),
   warningsBlock: document.getElementById("warnings-block"),
   warningsList: document.getElementById("warnings-list"),
   legend: document.getElementById("legend"),
@@ -244,35 +247,32 @@ async function load(forceRefresh = false) {
       renderWarnings([]);
       return;
     }
-    const cacheInfo = UI.describeCachePayload(data);
-    el.statusText.textContent = cacheInfo.statusText;
-    if (el.ageBadge) el.ageBadge.innerHTML = cacheInfo.badgeHtml;
+    if (typeof UI.describeCachePayload === "function") {
+      const cacheInfo = UI.describeCachePayload(data);
+      el.statusText.textContent = cacheInfo.statusText;
+      if (el.ageBadge) el.ageBadge.innerHTML = cacheInfo.badgeHtml;
+    } else if (data.cached) {
+      const mins = Math.max(0, Math.round((data.cacheAgeMs || 0) / 60000));
+      el.statusText.textContent = `Datos en caché (hace ~${mins} min).`;
+    } else {
+      el.statusText.textContent = "Datos actualizados correctamente.";
+    }
     el.metaSection.hidden = false;
     const sourceUrl = data.source || DMH_SOURCE;
     el.metaSource.href = sourceUrl;
     el.metaSource.textContent = "meteorologia.gov.py";
     el.metaTime.textContent = formatWhen(data.scrapedAt);
     el.metaCount.textContent = String(data.count ?? data.items?.length ?? 0);
-    // Chip SQLite solo en local; en producción (Turso/Vercel) no aporta y confunde.
-    const isLocal =
-      location.hostname === "localhost" || location.hostname === "127.0.0.1";
-    if (
-      isLocal &&
-      el.metaDbChip &&
-      data.dbSaved &&
-      data.dbSaved.rowsSaved > 0
-    ) {
-      el.metaDbChip.hidden = false;
-      el.metaDb.textContent = `${data.dbSaved.rowsSaved} filas → data/paraguay_dmh.sqlite`;
-    } else if (el.metaDbChip) {
-      el.metaDbChip.hidden = true;
-    }
     lastItems = Array.isArray(data.items) ? data.items : [];
     renderWarnings(data.warnings);
     renderTable();
   } catch (e) {
     console.error(e);
-    setError(UI.connectionErrorMessage(e));
+    setError(
+      typeof UI.connectionErrorMessage === "function"
+        ? UI.connectionErrorMessage(e)
+        : "No se pudo conectar al servidor."
+    );
     el.metaSection.hidden = true;
     el.toolbar.hidden = true;
     el.legend.hidden = true;
@@ -283,7 +283,12 @@ async function load(forceRefresh = false) {
 }
 
 el.btnRefresh.addEventListener("click", () => {
-  if (!UI.confirmForceRefresh()) return;
+  if (
+    typeof UI.confirmForceRefresh === "function" &&
+    !UI.confirmForceRefresh()
+  ) {
+    return;
+  }
   load(true);
 });
 el.filterInput.addEventListener(

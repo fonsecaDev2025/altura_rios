@@ -1,8 +1,8 @@
 /**
  * Service Worker: shell offline + network-first para /api públicas.
  */
-const CACHE_SHELL = "altura-rios-shell-v1";
-const CACHE_API = "altura-rios-api-v1";
+const CACHE_SHELL = "altura-rios-shell-v2";
+const CACHE_API = "altura-rios-api-v2";
 const SHELL = [
   "/",
   "/index.html",
@@ -17,13 +17,18 @@ const SHELL = [
   "/script.js",
   "/paraguay.js",
   "/pasos.js",
+  "/sw-register.js",
   "/manifest.webmanifest",
   "/icon.svg",
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_SHELL).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_SHELL)
+      .then((cache) => cache.addAll(SHELL))
+      .then(() => self.skipWaiting())
+      .catch((err) => console.warn("[sw] install", err))
   );
 });
 
@@ -72,18 +77,29 @@ self.addEventListener("fetch", (event) => {
 
   if (url.origin !== self.location.origin) return;
 
-  event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
+  // JS/CSS/HTML: red primero para evitar mezclar versiones tras deploy.
+  const isAsset =
+    url.pathname.endsWith(".js") ||
+    url.pathname.endsWith(".css") ||
+    url.pathname.endsWith(".html") ||
+    url.pathname === "/";
+
+  if (isAsset) {
+    event.respondWith(
+      fetch(req)
         .then((res) => {
-          if (res.ok && (url.pathname.endsWith(".js") || url.pathname.endsWith(".css") || url.pathname.endsWith(".html") || url.pathname === "/")) {
+          if (res.ok) {
             const clone = res.clone();
             caches.open(CACHE_SHELL).then((c) => c.put(req, clone));
           }
           return res;
         })
-        .catch(() => cached);
-      return cached || network;
-    })
+        .catch(() => caches.match(req).then((c) => c || Response.error()))
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(req).then((cached) => cached || fetch(req).catch(() => Response.error()))
   );
 });
