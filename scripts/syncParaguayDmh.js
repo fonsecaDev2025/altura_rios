@@ -3,11 +3,50 @@
  *   - data/paraguay_dmh.sqlite  (vía saveParaguayExtraccion)
  *   - data/alturas.sqlite       (vía saveUltimaExtraccionDelDia)
  *
+ * Con TURSO_* en .env/.env.local escribe en Turso (misma lógica que prod).
+ *
  * Útil si no usas el navegador o para poblar las bases manualmente.
  * Se usa también desde croniter_daily.py con `npm run sync:paraguay`.
  *
  *   node scripts/syncParaguayDmh.js
  */
+
+const fs = require("fs");
+const path = require("path");
+
+function unquote(val) {
+  let v = String(val ?? "").trim();
+  if (
+    (v.startsWith('"') && v.endsWith('"')) ||
+    (v.startsWith("'") && v.endsWith("'"))
+  ) {
+    v = v.slice(1, -1);
+  }
+  return v;
+}
+
+/** Carga .env y .env.local sin pisar variables ya definidas en el entorno. */
+function loadEnvFiles() {
+  const root = path.join(__dirname, "..");
+  for (const name of [".env", ".env.local"]) {
+    const p = path.join(root, name);
+    if (!fs.existsSync(p)) continue;
+    for (const line of fs.readFileSync(p, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      const val = unquote(trimmed.slice(eq + 1));
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  }
+  for (const key of ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]) {
+    if (process.env[key] !== undefined) process.env[key] = unquote(process.env[key]);
+  }
+}
+
+loadEnvFiles();
 
 const { parseRioParaguay } = require("../lib/paraguayConvencional");
 const {

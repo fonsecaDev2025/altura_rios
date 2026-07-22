@@ -149,7 +149,7 @@ Copiá `.env.example` a `.env`. Sin `TURSO_DATABASE_URL` se usan archivos en `da
 ### Checklist producción (Vercel)
 
 - [ ] `TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`
-- [ ] `CRON_SECRET` (y Cron en `vercel.json`: `0 11 * * *` UTC)
+- [ ] `CRON_SECRET` (y Cron en `vercel.json`: `0 20 * * *` UTC ≈ 17:00 ARG)
 - [ ] `TRUST_PROXY=1`
 - [ ] `NODE_ENV=production`
 - [ ] Migración: `npm run migrate:turso` + `npm run import:turso` (una vez)
@@ -165,13 +165,15 @@ Con Turso, las mismas tablas viven en la nube.
 
 ## Sincronización diaria
 
-**Producción (recomendado):** Vercel Cron → `/api/cron/sync` (11:00 UTC ≈ 08:00 ARG).
+**Producción (recomendado):** Vercel Cron → `/api/cron/sync` (20:00 UTC ≈ 17:00 ARG).
+
+DMH suele publicar la fecha del día recién a la tarde. Un cron a la mañana scrapea bien, pero guarda la **fecha de ayer** (UPSERT), y Turso parece “sin el día de hoy”.
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" https://altura-rios.vercel.app/api/cron/sync
 ```
 
-**Opcional local/Render:** `python3 croniter_daily.py` (+ `croniter_daily.service`). Por defecto solo corre `npm run sync:paraguay`.
+**Opcional local/Render:** `python3 croniter_daily.py` (+ `croniter_daily.service`). Por defecto solo corre `npm run sync:paraguay`. Con `TURSO_*` en `.env.local` también escribe en Turso.
 
 ## Despliegue en Vercel
 
